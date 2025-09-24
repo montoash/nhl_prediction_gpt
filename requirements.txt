@@ -1,8 +1,8 @@
-pandas
-scikit-learn
+pandas>=2.0
 xgboost
 nfl-data-py
 Flask
 joblib
 mapie
 gunicorn
+scikit-learn
