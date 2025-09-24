@@ -1,0 +1,8 @@
+pandas
+scikit-learn
+xgboost
+nfl-data-py
+Flask
+joblib
+mapie
+gunicorn
