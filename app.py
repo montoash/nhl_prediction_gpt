@@ -129,7 +129,13 @@ def get_latest_features(home_team_abbr, away_team_abbr):
     
     # 4. Return features matching the trained model's expected columns
     def build_feature_df(feature_names, values_map):
-        row = [values_map.get(name, None) for name in feature_names]
+        row = []
+        for name in feature_names:
+            val = values_map.get(name, None)
+            # Convert None to np.nan for XGBoost compatibility
+            if val is None:
+                val = np.nan
+            row.append(val)
         return pd.DataFrame([row], columns=feature_names)
 
     values_common = {
@@ -150,7 +156,29 @@ def get_latest_features(home_team_abbr, away_team_abbr):
         print("Odds not found. Using fallback model.")
         return build_feature_df(features_no_odds, values_common), False
 
-# --- API Endpoint ---
+# --- API Endpoints ---
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        'message': 'NFL Win Prediction API',
+        'version': '1.0',
+        'endpoints': {
+            '/': 'API information',
+            '/health': 'Health check',
+            '/predict': 'Predict NFL game outcome (params: home=<team>, away=<team>)'
+        }
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'healthy',
+        'models_loaded': {
+            'with_odds': model_with_odds is not None,
+            'without_odds': model_no_odds is not None
+        }
+    })
+
 @app.route('/predict', methods=['GET'])
 def predict():
     home_team = request.args.get('home')

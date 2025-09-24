@@ -9,3 +9,8 @@ nohup: ignoring input
 127.0.0.1 - - [24/Sep/2025 18:58:19] "[33mGET / HTTP/1.1[0m" 404 -
 127.0.0.1 - - [24/Sep/2025 18:58:22] "GET /predict?home=PHI&away=DAL HTTP/1.1" 200 -
 127.0.0.1 - - [24/Sep/2025 18:58:32] "GET /predict?home=KC&away=BUF HTTP/1.1" 200 -
+127.0.0.1 - - [24/Sep/2025 19:10:03] "[31m[1mPOST /predict HTTP/1.1[0m" 405 -
+127.0.0.1 - - [24/Sep/2025 19:10:25] "[33mGET / HTTP/1.1[0m" 404 -
+127.0.0.1 - - [24/Sep/2025 19:10:33] "[33mGET /health HTTP/1.1[0m" 404 -
+127.0.0.1 - - [24/Sep/2025 19:11:39] "[31m[1mGET /predict?home_team=BUF&away_team=NYJ HTTP/1.1[0m" 400 -
+127.0.0.1 - - [24/Sep/2025 19:11:51] "[35m[1mGET /predict?home=BUF&away=NYJ HTTP/1.1[0m" 500 -
