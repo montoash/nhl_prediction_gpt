@@ -13,48 +13,54 @@ app = Flask(__name__)
 model = joblib.load('./models/nfl_win_predictor.pkl')
 model_features = joblib.load('./models/features.pkl')
 
-# --- Helper function to get ROLLING AVERAGE features for two teams ---
+# --- Helper function to get ADVANCED features for a matchup ---
 def get_latest_features(home_team_abbr, away_team_abbr):
-    print(f"Fetching live rolling stats for {home_team_abbr} vs {away_team_abbr}...")
-    
+    print(f"Fetching advanced live features for {home_team_abbr} vs {away_team_abbr}...")
     current_year = datetime.now().year
     
-    # Fetch current season data
+    # 1. Get Live Betting Odds
+    latest_odds = nfl.import_odds([current_year])
+    game_odds = latest_odds[
+        (latest_odds['home_team'] == home_team_abbr) & 
+        (latest_odds['away_team'] == away_team_abbr)
+    ].tail(1)
+    
+    if game_odds.empty:
+        raise ValueError("Could not find live betting odds for this matchup.")
+    spread_line = game_odds['spread_line'].values[0]
+
+    # 2. Get Rolling Team Stats
     pbp = nfl.import_pbp_data([current_year], downcast=True, cache=True)
     pbp_reg = pbp.loc[(pbp['season_type'] == 'REG') & (pbp['epa'].notna())].copy()
     
-    # Calculate per-game stats
-    team_stats = pbp_reg.groupby(['posteam', 'week']).agg(
+    pbp_reg['is_explosive'] = (pbp_reg['epa'] > 1.75).astype(int)
+    pbp_reg['is_turnover'] = (pbp_reg['fumble_lost'] == 1) | (pbp_reg['interception'] == 1).astype(int)
+    
+    team_game_stats = pbp_reg.groupby(['posteam', 'week']).agg(
         off_epa_per_play=('epa', 'mean'),
-        off_success_rate=('success', 'mean')
+        explosive_play_rate=('is_explosive', 'mean'),
+        turnover_rate=('is_turnover', 'mean')
     ).reset_index()
-    
-    # Calculate 3-game rolling average for the entire season so far
-    team_stats = team_stats.sort_values(['posteam', 'week']).copy()
-    roll_window = 3
-    team_stats['pre_epa'] = team_stats.groupby('posteam')['off_epa_per_play'] \
-        .transform(lambda s: s.rolling(roll_window, min_periods=1).mean())
-    team_stats['pre_success'] = team_stats.groupby('posteam')['off_success_rate'] \
-        .transform(lambda s: s.rolling(roll_window, min_periods=1).mean())
 
-    # Get the MOST RECENT rolling average for each team
-    home_stats = team_stats[team_stats['posteam'] == home_team_abbr].tail(1)
-    away_stats = team_stats[team_stats['posteam'] == away_team_abbr].tail(1)
-    
-    if home_stats.empty or away_stats.empty:
-        raise ValueError("Could not find stats for one or both teams. They may not have played enough regular season games yet.")
+    team_stats_rolling = {}
+    for team in [home_team_abbr, away_team_abbr]:
+        team_df = team_game_stats[team_game_stats['posteam'] == team].copy()
+        team_df.sort_values('week', inplace=True)
+        roll_window = 4
         
-    home_pre_epa = home_stats['pre_epa'].values[0]
-    away_pre_epa = away_stats['pre_epa'].values[0]
-    home_pre_success = home_stats['pre_success'].values[0]
-    away_pre_success = away_stats['pre_success'].values[0]
+        # Calculate rolling average for each stat and get the most recent value
+        epa = team_df['off_epa_per_play'].rolling(roll_window, min_periods=1).mean().iloc[-1]
+        explosive = team_df['explosive_play_rate'].rolling(roll_window, min_periods=1).mean().iloc[-1]
+        turnover = team_df['turnover_rate'].rolling(roll_window, min_periods=1).mean().iloc[-1]
+        team_stats_rolling[team] = {'epa': epa, 'explosive': explosive, 'turnover': turnover}
     
-    # Calculate the feature differences
-    epa_diff = home_pre_epa - away_pre_epa
-    success_diff = home_pre_success - away_pre_success
+    # 3. Calculate Differential Features
+    epa_diff = team_stats_rolling[home_team_abbr]['epa'] - team_stats_rolling[away_team_abbr]['epa']
+    explosive_diff = team_stats_rolling[home_team_abbr]['explosive'] - team_stats_rolling[away_team_abbr]['explosive']
+    turnover_diff = team_stats_rolling[home_team_abbr]['turnover'] - team_stats_rolling[away_team_abbr]['turnover']
     
-    # Create a DataFrame in the correct format expected by the model
-    feature_df = pd.DataFrame([[epa_diff, success_diff]], columns=model_features)
+    # 4. Assemble Final Feature DataFrame
+    feature_df = pd.DataFrame([[spread_line, epa_diff, explosive_diff, turnover_diff]], columns=model_features)
     return feature_df
 
 # --- API Endpoint ---
@@ -69,15 +75,13 @@ def predict():
     try:
         features_df = get_latest_features(home_team, away_team)
 
-        # Get the underlying XGBoost model to predict probabilities
+        # Get probability from the underlying XGBoost model
         xgb_estimator = model.estimator
         probabilities = xgb_estimator.predict_proba(features_df)
         home_win_prob = probabilities[0][1]
 
-        # Use the conformal model to get the prediction set for uncertainty
+        # Get prediction set from the conformal model
         y_pred, y_pis = model.predict(features_df)
-        
-        # Interpret the prediction set
         prediction_set_indices = np.where(y_pis[0])[0]
         outcomes = ["Away Win", "Home Win"]
         plausible_outcomes = [outcomes[i] for i in prediction_set_indices]
@@ -86,7 +90,8 @@ def predict():
             'home_team': home_team,
             'away_team': away_team,
             'calibrated_home_win_prob': f"{home_win_prob:.2%}",
-            'conformal_prediction_set': plausible_outcomes
+            'conformal_prediction_set': plausible_outcomes,
+            'model_features_used': features_df.to_dict('records')[0]
         }
         return jsonify(result)
         
