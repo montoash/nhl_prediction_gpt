@@ -1,0 +1,34 @@
+# .renderignore - Files to exclude from Render deployment
+
+# Virtual environment
+.venv/
+venv/
+
+# Development files
+.devcontainer/
+.vscode/
+
+# Cache and temporary files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.cache/
+
+# Local development
+.env.local
+.env.development
+flask.log
+
+# Git files  
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Development scripts that aren't needed in production
+scripts/test_*.py
+scripts/debug_*.py
