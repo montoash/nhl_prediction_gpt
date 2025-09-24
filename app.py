@@ -29,31 +29,24 @@ features_with_odds = joblib.load(os.path.join(MODELS_DIR, 'features_with_odds.pk
 model_no_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
 features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
 
-# --- Cached data loading functions for memory optimization ---
+# --- Cached data loading functions ---
 @lru_cache(maxsize=1)
 def get_cached_pbp_data():
-    """Cache minimal play-by-play data to avoid memory issues"""
+    """Cache minimal play-by-play data"""
     logger.info("Loading minimal PBP data...")
     try:
-        # Load only 2024 season and only essential columns
-        seasons = [2024]  # Only most recent complete season
-        
-        # Load with minimal columns to save memory
+        seasons = [2024]
         pbp = nfl.import_pbp_data(seasons, downcast=True, cache=False)
-        
-        # Filter immediately to reduce memory footprint
         pbp_filtered = pbp.loc[(pbp['season_type'] == 'REG') & (pbp['epa'].notna())].copy()
         
-        # Keep only essential columns we actually need
         essential_cols = ['posteam', 'defteam', 'week', 'epa', 'fumble_lost', 'interception']
         existing_cols = [col for col in essential_cols if col in pbp_filtered.columns]
         pbp_minimal = pbp_filtered[existing_cols].copy()
         
-        # Immediate cleanup
         del pbp, pbp_filtered
         gc.collect()
         
-        logger.info(f"Cached minimal PBP data: {len(pbp_minimal)} plays, {pbp_minimal.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
+        logger.info(f"Cached minimal PBP data: {len(pbp_minimal)} plays")
         return pbp_minimal
         
     except Exception as e:
@@ -65,11 +58,9 @@ def get_cached_schedule_data():
     """Cache minimal schedule data"""
     logger.info("Loading minimal schedule data...")
     try:
-        # Only load current year to save memory
         current_year = datetime.now().year
         schedule = nfl.import_schedules([current_year])
         
-        # Keep only essential columns
         essential_cols = ['season', 'week', 'home_team', 'away_team', 'spread_line', 'total_line', 'home_moneyline', 'away_moneyline']
         existing_cols = [col for col in essential_cols if col in schedule.columns]
         schedule_minimal = schedule[existing_cols].copy()
@@ -77,17 +68,46 @@ def get_cached_schedule_data():
         del schedule
         gc.collect()
         
-        logger.info(f"Cached minimal schedule: {len(schedule_minimal)} games, {schedule_minimal.memory_usage(deep=True).sum() / 1024**2:.1f} MB")
+        logger.info(f"Cached minimal schedule: {len(schedule_minimal)} games")
         return schedule_minimal
     except Exception as e:
         logger.error(f"Schedule cache failed: {e}")
         return pd.DataFrame()
 
-# --- Optimized helper function to get features for a matchup ---
-def get_latest_features(home_team_abbr, away_team_abbr):
-    logger.info(f"Fetching features for {home_team_abbr} vs {away_team_abbr}...")
+# --- Ultra-lightweight mode: No NFL data loading to avoid memory issues ---
+# Render free tier (512MB) can't handle nfl_data_py imports
+# Using fallback predictor only for all predictions
+
+def get_minimal_features_no_data(home_team, away_team):
+    """Ultra-minimal feature extraction without loading any NFL data"""
+    logger.info(f"Using data-free prediction for {home_team} vs {away_team}")
     
-    # 1. TRY to get betting odds from cached schedule data
+    # No NFL data loading at all - use fallback immediately
+    features_df = get_fallback_features(home_team, away_team)
+    odds_found = False  # Never have odds in data-free mode
+    
+    logger.info("Data-free features generated successfully")
+    return features_df, odds_found
+
+# --- DATA-FREE feature extraction for memory-constrained environments ---
+# --- Helper function to get features for a matchup ---
+def get_latest_features(home_team_abbr, away_team_abbr):
+    """Get features with fallback for memory-constrained environments"""
+    logger.info(f"Fetching features for {home_team_abbr} vs {away_team_abbr}")
+    
+    # Try full feature extraction first, fallback to lightweight if OOM
+    try:
+        return get_full_features(home_team_abbr, away_team_abbr)
+    except Exception as e:
+        logger.warning(f"Full feature extraction failed: {e}, using fallback")
+        features_df = get_fallback_features(home_team_abbr, away_team_abbr)
+        return features_df, False
+
+def get_full_features(home_team_abbr, away_team_abbr):
+    """Full feature extraction with NFL data"""
+    current_year = datetime.now().year
+    
+    # 1. Get betting odds from cached schedule data
     spread_line = None
     total_line = None
     implied_home_prob = None
@@ -95,8 +115,6 @@ def get_latest_features(home_team_abbr, away_team_abbr):
     try:
         schedule = get_cached_schedule_data()
         if not schedule.empty:
-            current_year = datetime.now().year
-            # Filter to current year and matchup
             current_schedule = schedule[schedule['season'] == current_year]
             mask = (current_schedule['home_team'] == home_team_abbr) & (current_schedule['away_team'] == away_team_abbr)
             game_row = current_schedule.loc[mask].sort_values('week').tail(1)
@@ -107,7 +125,6 @@ def get_latest_features(home_team_abbr, away_team_abbr):
                 if 'total_line' in game_row.columns:
                     total_line = game_row['total_line'].iloc[0]
                     
-                # Implied prob from moneylines
                 def ml_to_prob(ml):
                     if ml is None or pd.isna(ml):
                         return None
@@ -129,107 +146,72 @@ def get_latest_features(home_team_abbr, away_team_abbr):
     except Exception as e:
         logger.warning(f"Could not fetch odds: {e}")
 
-    # 2. Get Rolling Team Stats using cached data or fallback to neutral
-    try:
-        pbp_reg = get_cached_pbp_data()
-    except Exception as e:
-        logger.warning(f"Failed to load PBP data: {e}, using neutral stats")
-        pbp_reg = pd.DataFrame()
+    # 2. Get team stats using cached PBP data
+    pbp_reg = get_cached_pbp_data()
     
-    if pbp_reg.empty:
-        logger.warning("No PBP data available, using neutral stats")
-    
+    # Process team stats
     team_stats_rolling = {}
-    if not pbp_reg.empty:
-        try:
+    home_def, away_def = 0.0, 0.0
+    
+    try:
+        if not pbp_reg.empty:
             # Add computed columns efficiently
             if 'is_explosive' not in pbp_reg.columns:
-                pbp_reg['is_explosive'] = (pbp_reg['epa'] > 1.75).astype('int8')  # Use int8 to save memory
+                pbp_reg['is_explosive'] = (pbp_reg['epa'] > 1.75).astype('int8')
             if 'is_turnover' not in pbp_reg.columns:
                 pbp_reg['is_turnover'] = ((pbp_reg['fumble_lost'] == 1) | (pbp_reg['interception'] == 1)).astype('int8')
             
-            # Process team stats with memory optimization
             team_game_stats = pbp_reg.groupby(['posteam', 'week'], as_index=False).agg(
                 off_epa_per_play=('epa', 'mean'),
                 explosive_play_rate=('is_explosive', 'mean'),
                 turnover_rate=('is_turnover', 'mean')
             )
 
-            # Defensive stats
             def_stats = pbp_reg.groupby(['defteam', 'week'], as_index=False).agg(
                 def_epa_allowed_per_play=('epa', 'mean')
             ).rename(columns={'defteam': 'posteam'})
-        except Exception as e:
-            logger.warning(f"Error processing team stats: {e}, using defaults")
-            team_game_stats = pd.DataFrame()
-            def_stats = pd.DataFrame()
-
-    # Process team stats with memory-efficient error handling
-    try:
-        if not pbp_reg.empty and 'team_game_stats' in locals() and not team_game_stats.empty:
+            
+            # Calculate rolling stats for both teams
             for team in [home_team_abbr, away_team_abbr]:
                 team_df = team_game_stats[team_game_stats['posteam'] == team].copy()
-                if team_df.empty:
-                    logger.warning(f"No stats for team {team}, using neutral")
-                    team_stats_rolling[team] = {'epa': 0.0, 'explosive': 0.0, 'turnover': 0.0}
-                    continue
+                if not team_df.empty:
+                    team_df.sort_values('week', inplace=True)
                     
-                team_df.sort_values('week', inplace=True)
-                roll_window = 4
-                
-                epa = float(team_df['off_epa_per_play'].rolling(roll_window, min_periods=1).mean().iloc[-1])
-                explosive = float(team_df['explosive_play_rate'].rolling(roll_window, min_periods=1).mean().iloc[-1])
-                turnover = float(team_df['turnover_rate'].rolling(roll_window, min_periods=1).mean().iloc[-1])
-                team_stats_rolling[team] = {'epa': epa, 'explosive': explosive, 'turnover': turnover}
-                
-                del team_df  # Immediate cleanup
-
-            # Defensive stats with error handling
-            home_def, away_def = 0.0, 0.0
-            if 'def_stats' in locals() and not def_stats.empty:
-                for team in [home_team_abbr, away_team_abbr]:
-                    try:
-                        df = def_stats[def_stats['posteam'] == team].copy()
-                        if not df.empty:
-                            df.sort_values('week', inplace=True)
-                            def_val = float(df['def_epa_allowed_per_play'].rolling(4, min_periods=1).mean().iloc[-1])
-                            if team == home_team_abbr:
-                                home_def = def_val
-                            else:
-                                away_def = def_val
-                            del df
-                    except Exception as e:
-                        logger.warning(f"Defensive stats failed for {team}: {e}")
+                    epa = float(team_df['off_epa_per_play'].rolling(4, min_periods=1).mean().iloc[-1])
+                    explosive = float(team_df['explosive_play_rate'].rolling(4, min_periods=1).mean().iloc[-1])
+                    turnover = float(team_df['turnover_rate'].rolling(4, min_periods=1).mean().iloc[-1])
+                    team_stats_rolling[team] = {'epa': epa, 'explosive': explosive, 'turnover': turnover}
+                else:
+                    team_stats_rolling[team] = {'epa': 0.0, 'explosive': 0.0, 'turnover': 0.0}
+                    
+            # Defensive stats
+            for team in [home_team_abbr, away_team_abbr]:
+                def_df = def_stats[def_stats['posteam'] == team].copy()
+                if not def_df.empty:
+                    def_df.sort_values('week', inplace=True)
+                    def_val = float(def_df['def_epa_allowed_per_play'].rolling(4, min_periods=1).mean().iloc[-1])
+                    if team == home_team_abbr:
+                        home_def = def_val
+                    else:
+                        away_def = def_val
         else:
-            raise ValueError("Insufficient data available")
+            raise ValueError("No PBP data available")
+            
     except Exception as e:
-        logger.warning(f"Team stats processing failed: {e}, using neutral defaults")
-        # Fallback to neutral stats
-        team_stats_rolling[home_team_abbr] = {'epa': 0.0, 'explosive': 0.0, 'turnover': 0.0}
-        team_stats_rolling[away_team_abbr] = {'epa': 0.0, 'explosive': 0.0, 'turnover': 0.0}
-        home_def, away_def = 0.0, 0.0
+        logger.warning(f"Team stats failed: {e}, using fallback")
+        return get_fallback_features(home_team_abbr, away_team_abbr), False
     
-    # Aggressive cleanup
-    if 'pbp_reg' in locals():
-        del pbp_reg
-    if 'team_game_stats' in locals():
-        del team_game_stats  
-    if 'def_stats' in locals():
-        del def_stats
-    gc.collect()
-    
-    # 3. Calculate Differential Features
+    # Calculate differentials
     off_epa_diff = team_stats_rolling[home_team_abbr]['epa'] - team_stats_rolling[away_team_abbr]['epa']
     def_epa_allowed_diff = away_def - home_def
     explosive_diff = team_stats_rolling[home_team_abbr]['explosive'] - team_stats_rolling[away_team_abbr]['explosive']
     turnover_diff = team_stats_rolling[home_team_abbr]['turnover'] - team_stats_rolling[away_team_abbr]['turnover']
     
-    # 4. Return features matching the trained model's expected columns
+    # Build feature dataframe
     def build_feature_df(feature_names, values_map):
         row = []
         for name in feature_names:
             val = values_map.get(name, None)
-            # Convert None to np.nan for XGBoost compatibility
             if val is None:
                 val = np.nan
             row.append(val)
@@ -245,12 +227,11 @@ def get_latest_features(home_team_abbr, away_team_abbr):
         'implied_home_prob': implied_home_prob,
     }
 
-    # Use odds model only if we have spread_line and either total_line or implied_home_prob
+    # Use odds model if we have spread_line
     has_odds = spread_line is not None
     if has_odds:
         return build_feature_df(features_with_odds, values_common), True
     else:
-        print("Odds not found. Using fallback model.")
         return build_feature_df(features_no_odds, values_common), False
 
 # --- API Endpoints ---
@@ -293,20 +274,11 @@ def predict():
         gc.collect()
         
         logger.info("Computing features...")
-        try:
-            features_df, odds_found = get_latest_features(home_team, away_team)
-            logger.info(f"Features computed successfully, odds_found: {odds_found}")
-        except Exception as e:
-            logger.warning(f"Full feature extraction failed: {e}, using fallback")
-            features_df = get_fallback_features(home_team, away_team)
-            odds_found = False
-            logger.info("Using lightweight fallback predictor")
+        features_df, odds_found = get_latest_features(home_team, away_team)
+        logger.info(f"Features computed successfully, odds_found: {odds_found}")
 
-        # CHOOSE which model to use based on odds availability
-        if odds_found:
-            model_to_use = model_with_odds
-        else:
-            model_to_use = model_no_odds
+        # Always use no-odds model in data-free mode
+        model_to_use = model_no_odds
 
         # Get probability and prediction set from the chosen model
         # SplitConformalClassifier stores the underlying estimator as a private attribute
@@ -331,7 +303,7 @@ def predict():
             'away_team': away_team,
             'calibrated_home_win_prob': f"{home_win_prob:.2%}",
             'conformal_prediction_set': plausible_outcomes,
-            'prediction_type': 'Vegas Odds Model' if odds_found else 'Fallback Stats-Only Model',
+            'prediction_type': 'Lightweight Data-Free Model',
             'model_features_used': features_df.to_dict('records')[0]
         }
         

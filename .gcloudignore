@@ -1,0 +1,22 @@
+# .gcloudignore - Files to exclude from Google Cloud deployment
+.gcloudignore
+.git
+.gitignore
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.cache/
+.env
+.env.local
+.devcontainer/
+.vscode/
+README.md
+*.md
+!README.md
+Dockerfile
+render.yaml
+.renderignore
