@@ -7,8 +7,15 @@ import nfl_data_py as nfl
 from datetime import datetime
 import numpy as np
 import os
+import logging
+from functools import lru_cache
+import gc  # For garbage collection
 
 app = Flask(__name__)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Resolve models directory relative to repository root
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -21,66 +28,102 @@ features_with_odds = joblib.load(os.path.join(MODELS_DIR, 'features_with_odds.pk
 model_no_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
 features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
 
-# --- Helper function to get features for a matchup ---
+# --- Cached data loading functions for memory optimization ---
+@lru_cache(maxsize=1)
+def get_cached_pbp_data():
+    """Cache play-by-play data to avoid reloading on every request"""
+    logger.info("Loading and caching PBP data...")
+    try:
+        # Only load recent seasons to save memory
+        current_year = datetime.now().year
+        seasons = [current_year - 1]  # Only previous complete season
+        
+        pbp = nfl.import_pbp_data(seasons, downcast=True, cache=False)
+        pbp_reg = pbp.loc[(pbp['season_type'] == 'REG') & (pbp['epa'].notna())].copy()
+        
+        # Free up memory
+        del pbp
+        gc.collect()
+        
+        logger.info(f"Cached PBP data for {len(pbp_reg)} plays")
+        return pbp_reg
+        
+    except Exception as e:
+        logger.error(f"PBP cache failed: {e}")
+        return pd.DataFrame()
+
+@lru_cache(maxsize=1)
+def get_cached_schedule_data():
+    """Cache schedule data to avoid reloading"""
+    logger.info("Loading and caching schedule data...")
+    try:
+        current_year = datetime.now().year
+        seasons = [current_year - 1, current_year]
+        schedule = nfl.import_schedules(seasons)
+        logger.info(f"Cached schedule for {len(schedule)} games")
+        return schedule
+    except Exception as e:
+        logger.error(f"Schedule cache failed: {e}")
+        return pd.DataFrame()
+
+# --- Optimized helper function to get features for a matchup ---
 def get_latest_features(home_team_abbr, away_team_abbr):
-    print(f"Fetching advanced live features for {home_team_abbr} vs {away_team_abbr}...")
-    current_year = datetime.now().year
+    logger.info(f"Fetching features for {home_team_abbr} vs {away_team_abbr}...")
     
-    # 1. TRY to get betting odds (spread_line, total_line, moneylines) from schedules
+    # 1. TRY to get betting odds from cached schedule data
     spread_line = None
     total_line = None
     implied_home_prob = None
+    
     try:
-        schedule = nfl.import_schedules([current_year])
-        # Filter to the latest scheduled matchup of the given home/away pair
-        mask = (schedule['home_team'] == home_team_abbr) & (schedule['away_team'] == away_team_abbr)
-        game_row = schedule.loc[mask].sort_values('week').tail(1)
-        if not game_row.empty:
-            if 'spread_line' in game_row.columns:
-                spread_line = game_row['spread_line'].iloc[0]
-            if 'total_line' in game_row.columns:
-                total_line = game_row['total_line'].iloc[0]
-            # Implied prob from moneylines
-            def ml_to_prob(ml):
-                if ml is None or pd.isna(ml):
-                    return None
-                try:
-                    ml = float(ml)
-                except Exception:
-                    return None
-                if ml < 0:
-                    return (-ml) / ((-ml) + 100)
-                else:
-                    return 100 / (ml + 100)
-            home_ml = game_row['home_moneyline'].iloc[0] if 'home_moneyline' in game_row.columns else None
-            away_ml = game_row['away_moneyline'].iloc[0] if 'away_moneyline' in game_row.columns else None
-            h = ml_to_prob(home_ml)
-            a = ml_to_prob(away_ml)
-            if h is not None and a is not None and (h + a) > 0:
-                implied_home_prob = h / (h + a)
+        schedule = get_cached_schedule_data()
+        if not schedule.empty:
+            current_year = datetime.now().year
+            # Filter to current year and matchup
+            current_schedule = schedule[schedule['season'] == current_year]
+            mask = (current_schedule['home_team'] == home_team_abbr) & (current_schedule['away_team'] == away_team_abbr)
+            game_row = current_schedule.loc[mask].sort_values('week').tail(1)
+            
+            if not game_row.empty:
+                if 'spread_line' in game_row.columns:
+                    spread_line = game_row['spread_line'].iloc[0]
+                if 'total_line' in game_row.columns:
+                    total_line = game_row['total_line'].iloc[0]
+                    
+                # Implied prob from moneylines
+                def ml_to_prob(ml):
+                    if ml is None or pd.isna(ml):
+                        return None
+                    try:
+                        ml = float(ml)
+                    except Exception:
+                        return None
+                    if ml < 0:
+                        return (-ml) / ((-ml) + 100)
+                    else:
+                        return 100 / (ml + 100)
+                        
+                home_ml = game_row['home_moneyline'].iloc[0] if 'home_moneyline' in game_row.columns else None
+                away_ml = game_row['away_moneyline'].iloc[0] if 'away_moneyline' in game_row.columns else None
+                h = ml_to_prob(home_ml)
+                a = ml_to_prob(away_ml)
+                if h is not None and a is not None and (h + a) > 0:
+                    implied_home_prob = h / (h + a)
     except Exception as e:
-        print(f"Could not fetch odds: {e}")
+        logger.warning(f"Could not fetch odds: {e}")
 
-    # 2. Get Rolling Team Stats (always needed)
-    # Try current year, then previous year; if unavailable, fall back to neutral stats
-    pbp_reg = None
-    try:
-        pbp = nfl.import_pbp_data([current_year], downcast=True, cache=False)
-        pbp_reg = pbp.loc[(pbp['season_type'] == 'REG') & (pbp['epa'].notna())].copy()
-    except Exception as e:
-        print(f"PBP fetch failed for {current_year}: {e}")
-        try:
-            pbp = nfl.import_pbp_data([current_year - 1], downcast=True, cache=False)
-            pbp_reg = pbp.loc[(pbp['season_type'] == 'REG') & (pbp['epa'].notna())].copy()
-            print(f"Using previous season PBP ({current_year - 1}) as fallback.")
-        except Exception as e2:
-            print(f"PBP fallback failed: {e2}")
-            pbp_reg = None
+    # 2. Get Rolling Team Stats using cached data
+    pbp_reg = get_cached_pbp_data()
+    if pbp_reg.empty:
+        logger.warning("No PBP data available, using neutral stats")
     
     team_stats_rolling = {}
-    if pbp_reg is not None and not pbp_reg.empty:
-        pbp_reg['is_explosive'] = (pbp_reg['epa'] > 1.75).astype(int)
-        pbp_reg['is_turnover'] = ((pbp_reg['fumble_lost'] == 1) | (pbp_reg['interception'] == 1)).astype(int)
+    if not pbp_reg.empty:
+        # Add computed columns if not already present
+        if 'is_explosive' not in pbp_reg.columns:
+            pbp_reg['is_explosive'] = (pbp_reg['epa'] > 1.75).astype(int)
+        if 'is_turnover' not in pbp_reg.columns:
+            pbp_reg['is_turnover'] = ((pbp_reg['fumble_lost'] == 1) | (pbp_reg['interception'] == 1)).astype(int)
         
         team_game_stats = pbp_reg.groupby(['posteam', 'week']).agg(
             off_epa_per_play=('epa', 'mean'),
@@ -181,14 +224,23 @@ def health():
 
 @app.route('/predict', methods=['GET'])
 def predict():
+    logger.info("Prediction request received")
+    
     home_team = request.args.get('home')
     away_team = request.args.get('away')
 
     if not home_team or not away_team:
         return jsonify({'error': 'Please provide both home and away team abbreviations.'}), 400
 
+    logger.info(f"Predicting {away_team} @ {home_team}")
+
     try:
+        # Add memory cleanup before processing
+        gc.collect()
+        
+        logger.info("Computing features...")
         features_df, odds_found = get_latest_features(home_team, away_team)
+        logger.info(f"Features computed successfully, odds_found: {odds_found}")
 
         # CHOOSE which model to use based on odds availability
         if odds_found:
@@ -222,9 +274,14 @@ def predict():
             'prediction_type': 'Vegas Odds Model' if odds_found else 'Fallback Stats-Only Model',
             'model_features_used': features_df.to_dict('records')[0]
         }
+        
+        logger.info(f"Prediction completed: {result['calibrated_home_win_prob']}")
         return jsonify(result)
         
     except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        # Memory cleanup on error
+        gc.collect()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

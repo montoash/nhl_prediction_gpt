@@ -5,17 +5,18 @@ import os
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
 backlog = 2048
 
-# Worker processes
-workers = int(os.environ.get('WEB_CONCURRENCY', '2'))
+# Worker processes - optimized for free tier
+workers = 1  # Reduced from 2 to save memory on free tier
 worker_class = "sync"
 worker_connections = 1000
-timeout = 30
+timeout = 120  # Increased from 30 to handle NFL data loading
 keepalive = 2
-max_requests = 1000
-max_requests_jitter = 100
+max_requests = 100  # Reduced to prevent memory accumulation
+max_requests_jitter = 10
 
-# Restart workers after this many requests, with up to max_requests_jitter added to avoid all workers restarting at the same time
-preload_app = True
+# Memory optimization for free tier
+preload_app = False  # Don't preload to save memory
+worker_tmp_dir = "/dev/shm"  # Use shared memory for temp files
 
 # Logging
 accesslog = "-"
