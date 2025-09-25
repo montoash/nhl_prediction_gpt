@@ -281,21 +281,93 @@ def root():
 
 @app.route('/health', methods=['GET'])
 def health():
-    try:
-        # Try to load models to verify they work
-        load_models()
-        models_ok = True
-    except Exception as e:
-        logger.warning(f"Health check - model loading failed: {e}")
-        models_ok = False
+    import traceback
+    import os
     
-    return jsonify({
-        'status': 'healthy' if models_ok else 'degraded',
+    health_info = {
+        'status': 'unknown',
         'models_loaded': {
-            'with_odds': models_ok,
-            'without_odds': models_ok
+            'with_odds': False,
+            'without_odds': False
+        },
+        'debug_info': {}
+    }
+    
+    try:
+        # Check if model files exist
+        models_dir = os.path.join(os.path.dirname(__file__), 'models')
+        required_files = [
+            'nfl_win_predictor_with_odds.pkl',
+            'features_with_odds.pkl', 
+            'nfl_win_predictor_no_odds.pkl',
+            'features_no_odds.pkl'
+        ]
+        
+        missing_files = []
+        for file in required_files:
+            file_path = os.path.join(models_dir, file)
+            if not os.path.exists(file_path):
+                missing_files.append(file)
+            else:
+                health_info['debug_info'][f'{file}_size'] = os.path.getsize(file_path)
+        
+        if missing_files:
+            health_info['status'] = 'degraded'
+            health_info['debug_info']['missing_files'] = missing_files
+            health_info['debug_info']['error'] = f"Missing model files: {missing_files}"
+        else:
+            # Try to load models
+            try:
+                load_models()
+                health_info['status'] = 'healthy'
+                health_info['models_loaded']['with_odds'] = True
+                health_info['models_loaded']['without_odds'] = True
+                health_info['debug_info']['models_loaded'] = 'success'
+            except Exception as model_error:
+                health_info['status'] = 'degraded'
+                health_info['debug_info']['model_error'] = str(model_error)
+                health_info['debug_info']['model_traceback'] = traceback.format_exc()
+        
+        health_info['debug_info']['models_dir_exists'] = os.path.exists(models_dir)
+        health_info['debug_info']['cwd'] = os.getcwd()
+        health_info['debug_info']['python_version'] = os.sys.version
+        
+    except Exception as e:
+        health_info['status'] = 'error'
+        health_info['debug_info']['health_check_error'] = str(e)
+        health_info['debug_info']['health_check_traceback'] = traceback.format_exc()
+    
+    return jsonify(health_info)
+
+@app.route('/debug', methods=['GET'])
+def debug_info():
+    """Debug endpoint to check deployment status"""
+    import os
+    import sys
+    
+    debug_data = {
+        'deployment_info': {
+            'cwd': os.getcwd(),
+            'python_version': sys.version,
+            'python_path': sys.path[:3]  # First 3 entries
+        },
+        'file_system': {},
+        'environment': {
+            'PORT': os.environ.get('PORT', 'Not set'),
+            'GAE_ENV': os.environ.get('GAE_ENV', 'Not set'),
+            'K_SERVICE': os.environ.get('K_SERVICE', 'Not set')
         }
-    })
+    }
+    
+    # Check key directories
+    for directory in ['.', 'models', 'scripts']:
+        dir_path = os.path.join(os.getcwd(), directory)
+        if os.path.exists(dir_path):
+            debug_data['file_system'][directory] = os.listdir(dir_path)
+        else:
+            debug_data['file_system'][directory] = 'Does not exist'
+    
+    return jsonify(debug_data)
 
 @app.route('/predict', methods=['GET'])
 def predict():
