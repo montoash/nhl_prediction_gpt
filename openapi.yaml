@@ -105,7 +105,7 @@ components:
         - 'MIA'
         - 'MIN'
         - 'NE'
-        - 'NO'
+        - !!str 'NO'
         - 'NYG'
         - 'NYJ'
         - 'PHI'
@@ -121,7 +121,7 @@ components:
       properties:
         status:
           type: string
-          enum: [healthy, degraded, error]
+          enum: ['healthy', 'degraded', 'error']
         models_loaded:
           type: object
           properties:
