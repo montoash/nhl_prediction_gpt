@@ -77,6 +77,35 @@ paths:
         '500':
           description: Internal error
 
+  /odds:
+    get:
+      summary: Get live betting odds for NFL games
+      operationId: getLiveOdds
+      parameters:
+        - in: query
+          name: home
+          required: false
+          description: Home team NFL abbreviation (optional, for specific game)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+        - in: query
+          name: away
+          required: false
+          description: Away team NFL abbreviation (optional, for specific game)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+      responses:
+        '200':
+          description: Prediction result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictResponse'
+        '400':
+          description: Missing or invalid parameters
+        '500':
+          description: Internal error
+
 components:
   schemas:
     TeamAbbr:

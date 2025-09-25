@@ -11,6 +11,7 @@ import logging
 from functools import lru_cache
 import gc  # For garbage collection
 from fallback_predictor import get_fallback_features
+from odds_fetcher import get_game_odds, get_live_odds
 
 app = Flask(__name__)
 
@@ -281,13 +282,21 @@ def get_full_features(home_team_abbr, away_team_abbr):
     else:
         return build_feature_df(features_no_odds, values_common), False
 
-# --- Market odds helper (lightweight) ---
+# --- Market odds helper (LIVE ODDS) ---
 def get_market_odds(home_team_abbr: str, away_team_abbr: str):
-    """Fetch market odds (spread, total, moneylines) from cached schedule without loading PBP.
+    """Fetch LIVE market odds with fallback to cached schedule.
+    Prioritizes real-time odds for true edge computation.
     Returns dict with keys: spread_line, total_line, home_moneyline, away_moneyline, implied_home_prob
-    or an empty dict if not found.
     """
     try:
+        # First try live odds fetcher
+        live_odds = get_game_odds(home_team_abbr, away_team_abbr)
+        if live_odds and any(live_odds.get(k) is not None for k in ['spread_line', 'total_line', 'home_moneyline']):
+            logger.info(f"Using LIVE odds for {home_team_abbr} vs {away_team_abbr} from {live_odds.get('source', 'unknown')}")
+            return live_odds
+        
+        # Fallback to cached schedule data
+        logger.info(f"No live odds found, falling back to cached schedule for {home_team_abbr} vs {away_team_abbr}")
         schedule = get_cached_schedule_data()
         if schedule.empty:
             return {}
@@ -327,6 +336,7 @@ def get_market_odds(home_team_abbr: str, away_team_abbr: str):
             'home_moneyline': home_ml,
             'away_moneyline': away_ml,
             'implied_home_prob': implied_home_prob,
+            'source': 'cached_schedule'
         }
     except Exception as e:
         logger.warning(f"Market odds fetch failed: {e}")
@@ -447,6 +457,40 @@ def serve_openapi_spec():
     except TypeError:
         # Fallback for older Flask versions where send_from_directory uses filename arg
         return send_from_directory(directory=repo_root, filename='openapi.yaml', mimetype='application/yaml')
+
+@app.route('/odds', methods=['GET', 'OPTIONS'])
+def get_odds():
+    """Get current live odds for all NFL games"""
+    try:
+        home_team = request.args.get('home')
+        away_team = request.args.get('away')
+        
+        if home_team and away_team:
+            # Get odds for specific game
+            odds = get_game_odds(home_team, away_team)
+            if odds:
+                return jsonify({
+                    'game': f"{away_team} @ {home_team}",
+                    'odds': odds
+                })
+            else:
+                return jsonify({
+                    'game': f"{away_team} @ {home_team}",
+                    'odds': None,
+                    'message': 'No odds found for this matchup'
+                })
+        else:
+            # Get all current odds
+            all_odds = get_live_odds()
+            return jsonify({
+                'total_games': len(all_odds),
+                'games': all_odds,
+                'last_updated': datetime.now().isoformat()
+            })
+            
+    except Exception as e:
+        logger.error(f"Odds endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/predict', methods=['GET', 'OPTIONS'])
 def predict():
@@ -690,9 +734,13 @@ def predict():
         away_score = max(10, min(50, away_score))
         predicted_total = home_score + away_score
         
-        # Betting analysis
-        # Prefer explicit query params; else try cached market odds; else feature-derived lines
+        # Betting analysis with LIVE ODDS
+        # Prefer explicit query params; else get LIVE market odds; else feature-derived lines
         market = {} if (q_spread or q_total or q_home_ml or q_away_ml) else get_market_odds(home_team, away_team)
+        
+        # Log odds source for transparency
+        if market and market.get('source'):
+            logger.info(f"Using {market['source']} odds for edge computation")
 
         actual_spread = None
         try:
