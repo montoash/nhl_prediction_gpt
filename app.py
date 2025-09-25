@@ -273,6 +273,57 @@ def get_full_features(home_team_abbr, away_team_abbr):
     else:
         return build_feature_df(features_no_odds, values_common), False
 
+# --- Market odds helper (lightweight) ---
+def get_market_odds(home_team_abbr: str, away_team_abbr: str):
+    """Fetch market odds (spread, total, moneylines) from cached schedule without loading PBP.
+    Returns dict with keys: spread_line, total_line, home_moneyline, away_moneyline, implied_home_prob
+    or an empty dict if not found.
+    """
+    try:
+        schedule = get_cached_schedule_data()
+        if schedule.empty:
+            return {}
+        current_year = datetime.now().year
+        # Prefer current season rows
+        sched = schedule[schedule['season'] == current_year] if 'season' in schedule.columns else schedule
+        mask = (sched.get('home_team') == home_team_abbr) & (sched.get('away_team') == away_team_abbr)
+        game_row = sched.loc[mask].sort_values('week').tail(1)
+        if game_row.empty:
+            return {}
+
+        def ml_to_prob(ml):
+            if ml is None or pd.isna(ml):
+                return None
+            try:
+                ml = float(ml)
+            except Exception:
+                return None
+            if ml < 0:
+                return (-ml) / ((-ml) + 100)
+            else:
+                return 100 / (ml + 100)
+
+        spread_line = game_row['spread_line'].iloc[0] if 'spread_line' in game_row.columns else None
+        total_line = game_row['total_line'].iloc[0] if 'total_line' in game_row.columns else None
+        home_ml = game_row['home_moneyline'].iloc[0] if 'home_moneyline' in game_row.columns else None
+        away_ml = game_row['away_moneyline'].iloc[0] if 'away_moneyline' in game_row.columns else None
+        h = ml_to_prob(home_ml)
+        a = ml_to_prob(away_ml)
+        implied_home_prob = None
+        if h is not None and a is not None and (h + a) > 0:
+            implied_home_prob = h / (h + a)
+
+        return {
+            'spread_line': spread_line,
+            'total_line': total_line,
+            'home_moneyline': home_ml,
+            'away_moneyline': away_ml,
+            'implied_home_prob': implied_home_prob,
+        }
+    except Exception as e:
+        logger.warning(f"Market odds fetch failed: {e}")
+        return {}
+
 # --- API Endpoints ---
 @app.route('/', methods=['GET'])
 def root():
@@ -453,8 +504,18 @@ def predict():
             away_score = max(10, min(50, away_score))
             predicted_total = home_score + away_score
 
-            actual_spread = features.get('spread_line')
-            actual_total = features.get('total_line')
+            # Try to enrich with cached market odds
+            market = {} if (q_spread or q_total or q_home_ml or q_away_ml) else get_market_odds(home_team, away_team)
+            actual_spread = None
+            try:
+                actual_spread = float(q_spread) if q_spread is not None else (market.get('spread_line') if market else features.get('spread_line'))
+            except Exception:
+                actual_spread = (market.get('spread_line') if market else features.get('spread_line'))
+            actual_total = None
+            try:
+                actual_total = float(q_total) if q_total is not None else (market.get('total_line') if market else features.get('total_line'))
+            except Exception:
+                actual_total = (market.get('total_line') if market else features.get('total_line'))
 
             # Recommendations without models
             spread_recommendation = "No Line Available"
@@ -479,7 +540,19 @@ def predict():
                     total_recommendation = "No Strong Edge"
                     total_confidence = "Low"
 
-            implied_home_prob_odds = features.get('implied_home_prob')
+            try:
+                if q_home_ml is not None and q_away_ml is not None:
+                    hml = float(q_home_ml)
+                    aml = float(q_away_ml)
+                    def ml_to_prob(ml):
+                        return (-ml) / ((-ml) + 100) if ml < 0 else 100 / (ml + 100)
+                    h = ml_to_prob(hml)
+                    a = ml_to_prob(aml)
+                    implied_home_prob_odds = h / (h + a) if (h + a) > 0 else None
+                else:
+                    implied_home_prob_odds = (market.get('implied_home_prob') if market else features.get('implied_home_prob'))
+            except Exception:
+                implied_home_prob_odds = (market.get('implied_home_prob') if market else features.get('implied_home_prob'))
             moneyline_recommendation = "No Odds Available"
             moneyline_value = 0
             if implied_home_prob_odds is not None and not pd.isna(implied_home_prob_odds):
@@ -491,6 +564,14 @@ def predict():
 
             plausible_outcomes = ["Home Win"] if home_win_prob >= 0.55 else (["Away Win"] if home_win_prob <= 0.45 else ["Home Win", "Away Win"])
 
+            # Compute edges when we have market lines
+            spread_edge_points = None
+            total_edge_points = None
+            if actual_spread is not None and not pd.isna(actual_spread):
+                spread_edge_points = predicted_spread - actual_spread
+            if actual_total is not None and not pd.isna(actual_total):
+                total_edge_points = predicted_total - actual_total
+
             result = {
                 'matchup': f"{away_team} @ {home_team}",
                 'game_prediction': {
@@ -500,8 +581,8 @@ def predict():
                     'confidence_level': plausible_outcomes[0] if len(plausible_outcomes) == 1 else 'Low Confidence'
                 },
                 'edges': {
-                    'spread_points': 'N/A',
-                    'total_points': 'N/A',
+                    'spread_points': round(spread_edge_points, 1) if spread_edge_points is not None else 'N/A',
+                    'total_points': round(total_edge_points, 1) if total_edge_points is not None else 'N/A',
                     'moneyline_percent': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A'
                 },
                 'score_prediction': {
@@ -602,18 +683,20 @@ def predict():
         predicted_total = home_score + away_score
         
         # Betting analysis
-        # Prefer explicit query params when provided; otherwise use features-derived lines
+        # Prefer explicit query params; else try cached market odds; else feature-derived lines
+        market = {} if (q_spread or q_total or q_home_ml or q_away_ml) else get_market_odds(home_team, away_team)
+
         actual_spread = None
         try:
-            actual_spread = float(q_spread) if q_spread is not None else features.get('spread_line')
+            actual_spread = float(q_spread) if q_spread is not None else (market.get('spread_line') if market else features.get('spread_line'))
         except Exception:
-            actual_spread = features.get('spread_line')
+            actual_spread = (market.get('spread_line') if market else features.get('spread_line'))
 
         actual_total = None
         try:
-            actual_total = float(q_total) if q_total is not None else features.get('total_line')
+            actual_total = float(q_total) if q_total is not None else (market.get('total_line') if market else features.get('total_line'))
         except Exception:
-            actual_total = features.get('total_line')
+            actual_total = (market.get('total_line') if market else features.get('total_line'))
         
         # Compute edges
         spread_edge_points = None
@@ -659,9 +742,9 @@ def predict():
                 if (h + a) > 0:
                     implied_home_prob_odds = h / (h + a)
             else:
-                implied_home_prob_odds = features.get('implied_home_prob')
+                implied_home_prob_odds = (market.get('implied_home_prob') if market else features.get('implied_home_prob'))
         except Exception:
-            implied_home_prob_odds = features.get('implied_home_prob')
+            implied_home_prob_odds = (market.get('implied_home_prob') if market else features.get('implied_home_prob'))
         moneyline_recommendation = "No Odds Available"
         moneyline_value = 0
         if implied_home_prob_odds is not None and not pd.isna(implied_home_prob_odds):
