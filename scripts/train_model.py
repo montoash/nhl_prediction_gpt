@@ -168,8 +168,8 @@ calibrated_odds.fit(X_calib, y_calib)
 conformal_model_odds = SplitConformalClassifier(estimator=calibrated_odds, confidence_level=0.95, conformity_score="lac", prefit=True)
 conformal_model_odds.conformalize(X_calib, y_calib)
 
-joblib.dump(conformal_model_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'))
-joblib.dump(features_with_odds, os.path.join(MODELS_DIR, 'features_with_odds.pkl'))
+joblib.dump(conformal_model_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'), protocol=2)
+joblib.dump(features_with_odds, os.path.join(MODELS_DIR, 'features_with_odds.pkl'), protocol=2)
 print("Primary model saved.")
 
 # === Train and Save Fallback Model (no odds) ===
@@ -200,8 +200,8 @@ calibrated_no_odds.fit(X_calib, y_calib)
 conformal_model_no_odds = SplitConformalClassifier(estimator=calibrated_no_odds, confidence_level=0.95, conformity_score="lac", prefit=True)
 conformal_model_no_odds.conformalize(X_calib, y_calib)
 
-joblib.dump(conformal_model_no_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
-joblib.dump(features_no_odds, os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
+joblib.dump(conformal_model_no_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'), protocol=2)
+joblib.dump(features_no_odds, os.path.join(MODELS_DIR, 'features_no_odds.pkl'), protocol=2)
 print("Fallback model saved.")
 
 print("Advanced model training complete. 🚀")

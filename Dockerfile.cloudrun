@@ -1,5 +1,5 @@
-# Dockerfile optimized for Google Cloud Run
-FROM python:3.11-slim
+# Dockerfile optimized for Google Cloud Run - Using Python 3.10 for model compatibility
+FROM python:3.10-slim
 
 # Set working directory
 WORKDIR /app
