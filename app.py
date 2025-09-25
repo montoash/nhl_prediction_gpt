@@ -22,12 +22,29 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(REPO_ROOT, 'models')
 
-# Load BOTH models and their feature lists
-model_with_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'))
-features_with_odds = joblib.load(os.path.join(MODELS_DIR, 'features_with_odds.pkl'))
+# Lazy loading - models loaded on first request to handle version issues
+model_with_odds = None
+features_with_odds = None
+model_no_odds = None
+features_no_odds = None
 
-model_no_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
-features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
+def load_models():
+    """Load models with error handling"""
+    global model_with_odds, features_with_odds, model_no_odds, features_no_odds
+    
+    if model_with_odds is None:
+        try:
+            logger.info("Loading ML models...")
+            model_with_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'))
+            features_with_odds = joblib.load(os.path.join(MODELS_DIR, 'features_with_odds.pkl'))
+            model_no_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
+            features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
+            logger.info("Models loaded successfully")
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            raise RuntimeError(f"Could not load ML models: {e}")
+    
+    return model_with_odds, features_with_odds, model_no_odds, features_no_odds
 
 # --- Cached data loading functions ---
 @lru_cache(maxsize=1)
@@ -249,11 +266,19 @@ def root():
 
 @app.route('/health', methods=['GET'])
 def health():
+    try:
+        # Try to load models to verify they work
+        load_models()
+        models_ok = True
+    except Exception as e:
+        logger.warning(f"Health check - model loading failed: {e}")
+        models_ok = False
+    
     return jsonify({
-        'status': 'healthy',
+        'status': 'healthy' if models_ok else 'degraded',
         'models_loaded': {
-            'with_odds': model_with_odds is not None,
-            'without_odds': model_no_odds is not None
+            'with_odds': models_ok,
+            'without_odds': models_ok
         }
     })
 
@@ -274,11 +299,35 @@ def predict():
         gc.collect()
         
         logger.info("Computing features...")
-        features_df, odds_found = get_latest_features(home_team, away_team)
-        logger.info(f"Features computed successfully, odds_found: {odds_found}")
+        try:
+            features_df, odds_found = get_latest_features(home_team, away_team)
+            logger.info(f"Features computed successfully, odds_found: {odds_found}")
+        except Exception as e:
+            logger.warning(f"Full feature extraction failed: {e}, using fallback")
+            features_df = get_fallback_features(home_team, away_team)
+            odds_found = False
 
-        # Always use no-odds model in data-free mode
-        model_to_use = model_no_odds
+        # Load models with error handling
+        try:
+            model_with_odds_loaded, features_with_odds_loaded, model_no_odds_loaded, features_no_odds_loaded = load_models()
+        except Exception as e:
+            logger.error(f"Model loading failed: {e}")
+            # Return fallback prediction if models can't load
+            return jsonify({
+                'home_team': home_team,
+                'away_team': away_team,
+                'calibrated_home_win_prob': "60.00%",
+                'conformal_prediction_set': ["Home Win", "Away Win"],
+                'prediction_type': 'Fallback Heuristics (Models Unavailable)',
+                'model_features_used': features_df.to_dict('records')[0],
+                'error': f'ML models could not be loaded: {str(e)}'
+            })
+
+        # Choose which model to use
+        if odds_found:
+            model_to_use = model_with_odds_loaded
+        else:
+            model_to_use = model_no_odds_loaded
 
         # Get probability and prediction set from the chosen model
         # SplitConformalClassifier stores the underlying estimator as a private attribute
