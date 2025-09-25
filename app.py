@@ -18,6 +18,14 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Add CORS headers to all responses for GPT Action compatibility
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 # Resolve models directory relative to repository root
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(REPO_ROOT, 'models')
@@ -325,7 +333,7 @@ def get_market_odds(home_team_abbr: str, away_team_abbr: str):
         return {}
 
 # --- API Endpoints ---
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'OPTIONS'])
 def root():
     return jsonify({
         'message': 'NFL Win Prediction API',
@@ -337,7 +345,7 @@ def root():
         }
     })
 
-@app.route('/health', methods=['GET'])
+@app.route('/health', methods=['GET', 'OPTIONS'])
 def health():
     import traceback
     import os
@@ -397,7 +405,7 @@ def health():
     
     return jsonify(health_info)
 
-@app.route('/debug', methods=['GET'])
+@app.route('/debug', methods=['GET', 'OPTIONS'])
 def debug_info():
     """Debug endpoint to check deployment status"""
     import os
@@ -427,8 +435,8 @@ def debug_info():
     
     return jsonify(debug_data)
 
-@app.route('/openapi', methods=['GET'])
-@app.route('/openapi.yaml', methods=['GET'])
+@app.route('/openapi', methods=['GET', 'OPTIONS'])
+@app.route('/openapi.yaml', methods=['GET', 'OPTIONS'])
 def serve_openapi_spec():
     """Serve the OpenAPI specification file for Action import."""
     import os
@@ -440,7 +448,7 @@ def serve_openapi_spec():
         # Fallback for older Flask versions where send_from_directory uses filename arg
         return send_from_directory(directory=repo_root, filename='openapi.yaml', mimetype='application/yaml')
 
-@app.route('/predict', methods=['GET'])
+@app.route('/predict', methods=['GET', 'OPTIONS'])
 def predict():
     logger.info("Prediction request received - starting memory optimization")
     
