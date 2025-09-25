@@ -82,39 +82,8 @@ components:
     TeamAbbr:
       type: string
       description: Official NFL team abbreviation
-      enum:
-        - 'ARI'
-        - 'ATL'
-        - 'BAL'
-        - 'BUF'
-        - 'CAR'
-        - 'CHI'
-        - 'CIN'
-        - 'CLE'
-        - 'DAL'
-        - 'DEN'
-        - 'DET'
-        - 'GB'
-        - 'HOU'
-        - 'IND'
-        - 'JAX'
-        - 'KC'
-        - 'LAC'
-        - 'LAR'
-        - 'LV'
-        - 'MIA'
-        - 'MIN'
-        - 'NE'
-        - !!str 'NO'
-        - 'NYG'
-        - 'NYJ'
-        - 'PHI'
-        - 'PIT'
-        - 'SEA'
-        - 'SF'
-        - 'TB'
-        - 'TEN'
-        - 'WAS'
+      example: KC
+      pattern: '^(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)$'
 
     HealthResponse:
       type: object
