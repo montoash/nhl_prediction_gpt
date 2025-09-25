@@ -37,6 +37,34 @@ paths:
           description: Away team NFL abbreviation (e.g., BUF, DAL)
           schema:
             $ref: '#/components/schemas/TeamAbbr'
+        - in: query
+          name: spread
+          required: false
+          description: Current point spread (negative favors home, e.g., -3.5)
+          schema:
+            type: number
+            format: float
+        - in: query
+          name: total
+          required: false
+          description: Current total points line (e.g., 47.5)
+          schema:
+            type: number
+            format: float
+        - in: query
+          name: home_ml
+          required: false
+          description: Home moneyline (American odds, e.g., -140)
+          schema:
+            type: number
+            format: float
+        - in: query
+          name: away_ml
+          required: false
+          description: Away moneyline (American odds, e.g., +120)
+          schema:
+            type: number
+            format: float
       responses:
         '200':
           description: Prediction result

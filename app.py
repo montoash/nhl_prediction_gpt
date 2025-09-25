@@ -395,6 +395,11 @@ def predict():
     
     home_team = request.args.get('home')
     away_team = request.args.get('away')
+    # Optional market inputs for immediate edge computation
+    q_spread = request.args.get('spread')
+    q_total = request.args.get('total')
+    q_home_ml = request.args.get('home_ml')
+    q_away_ml = request.args.get('away_ml')
 
     if not home_team or not away_team:
         return jsonify({'error': 'Please provide both home and away team abbreviations.'}), 400
@@ -592,8 +597,18 @@ def predict():
         predicted_total = home_score + away_score
         
         # Betting analysis
-        actual_spread = features.get('spread_line')
-        actual_total = features.get('total_line')
+        # Prefer explicit query params when provided; otherwise use features-derived lines
+        actual_spread = None
+        try:
+            actual_spread = float(q_spread) if q_spread is not None else features.get('spread_line')
+        except Exception:
+            actual_spread = features.get('spread_line')
+
+        actual_total = None
+        try:
+            actual_total = float(q_total) if q_total is not None else features.get('total_line')
+        except Exception:
+            actual_total = features.get('total_line')
         
         # Spread betting recommendation
         spread_recommendation = "No Line Available"
@@ -620,7 +635,22 @@ def predict():
                 total_confidence = "Low"
         
         # Moneyline value analysis
-        implied_home_prob_odds = features.get('implied_home_prob')
+        # Derive implied probability from moneylines if provided
+        implied_home_prob_odds = None
+        try:
+            if q_home_ml is not None and q_away_ml is not None:
+                hml = float(q_home_ml)
+                aml = float(q_away_ml)
+                def ml_to_prob(ml):
+                    return (-ml) / ((-ml) + 100) if ml < 0 else 100 / (ml + 100)
+                h = ml_to_prob(hml)
+                a = ml_to_prob(aml)
+                if (h + a) > 0:
+                    implied_home_prob_odds = h / (h + a)
+            else:
+                implied_home_prob_odds = features.get('implied_home_prob')
+        except Exception:
+            implied_home_prob_odds = features.get('implied_home_prob')
         moneyline_recommendation = "No Odds Available"
         moneyline_value = 0
         if implied_home_prob_odds is not None and not pd.isna(implied_home_prob_odds):
