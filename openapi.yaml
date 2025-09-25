@@ -153,6 +153,24 @@ components:
               example: 37.5%
             confidence_level:
               type: string
+        edges:
+          type: object
+          properties:
+            spread_points:
+              oneOf:
+                - type: number
+                  format: float
+                - type: string
+                  example: N/A
+            total_points:
+              oneOf:
+                - type: number
+                  format: float
+                - type: string
+                  example: N/A
+            moneyline_percent:
+              type: string
+              example: +5.2%
         score_prediction:
           type: object
           properties:

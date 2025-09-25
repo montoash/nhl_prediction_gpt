@@ -499,6 +499,11 @@ def predict():
                     'away_win_probability': f"{away_win_prob:.1%}",
                     'confidence_level': plausible_outcomes[0] if len(plausible_outcomes) == 1 else 'Low Confidence'
                 },
+                'edges': {
+                    'spread_points': 'N/A',
+                    'total_points': 'N/A',
+                    'moneyline_percent': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A'
+                },
                 'score_prediction': {
                     'home_team_score': round(home_score, 1),
                     'away_team_score': round(away_score, 1),
@@ -610,11 +615,16 @@ def predict():
         except Exception:
             actual_total = features.get('total_line')
         
+        # Compute edges
+        spread_edge_points = None
+        total_edge_points = None
+
         # Spread betting recommendation
         spread_recommendation = "No Line Available"
         spread_confidence = "N/A"
         if actual_spread is not None and not pd.isna(actual_spread):
             spread_diff = predicted_spread - actual_spread
+            spread_edge_points = spread_diff
             if abs(spread_diff) > 3:
                 spread_recommendation = f"Take {'Home' if spread_diff > 0 else 'Away'} ({spread_diff:+.1f} point edge)"
                 spread_confidence = "High" if abs(spread_diff) > 6 else "Medium"
@@ -627,6 +637,7 @@ def predict():
         total_confidence = "N/A"
         if actual_total is not None and not pd.isna(actual_total):
             total_diff = predicted_total - actual_total
+            total_edge_points = total_diff
             if abs(total_diff) > 3:
                 total_recommendation = f"{'Over' if total_diff > 0 else 'Under'} ({total_diff:+.1f} point edge)"
                 total_confidence = "High" if abs(total_diff) > 6 else "Medium"
@@ -667,6 +678,11 @@ def predict():
                 'home_win_probability': f"{home_win_prob:.1%}",
                 'away_win_probability': f"{away_win_prob:.1%}",
                 'confidence_level': plausible_outcomes[0] if len(plausible_outcomes) == 1 else 'Low Confidence'
+            },
+            'edges': {
+                'spread_points': round(spread_edge_points, 1) if spread_edge_points is not None else 'N/A',
+                'total_points': round(total_edge_points, 1) if total_edge_points is not None else 'N/A',
+                'moneyline_percent': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A'
             },
             'score_prediction': {
                 'home_team_score': round(home_score, 1),
