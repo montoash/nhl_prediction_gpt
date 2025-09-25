@@ -1,6 +1,6 @@
 # app.py
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import pandas as pd
 import joblib
 import nfl_data_py as nfl
@@ -368,6 +368,19 @@ def debug_info():
             debug_data['file_system'][directory] = 'Does not exist'
     
     return jsonify(debug_data)
+
+@app.route('/openapi', methods=['GET'])
+@app.route('/openapi.yaml', methods=['GET'])
+def serve_openapi_spec():
+    """Serve the OpenAPI specification file for Action import."""
+    import os
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    # Prefer explicit YAML mimetype for better compatibility with Action importers
+    try:
+        return send_from_directory(directory=repo_root, path='openapi.yaml', mimetype='application/yaml')
+    except TypeError:
+        # Fallback for older Flask versions where send_from_directory uses filename arg
+        return send_from_directory(directory=repo_root, filename='openapi.yaml', mimetype='application/yaml')
 
 @app.route('/predict', methods=['GET'])
 def predict():

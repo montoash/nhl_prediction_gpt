@@ -1,0 +1,203 @@
+openapi: 3.0.3
+info:
+  title: NFL Prediction API
+  version: 1.0.0
+  description: |
+    Predict NFL game outcomes with model probabilities, score predictions, and betting analysis.
+    This spec is tailored for use as a Custom GPT Action.
+servers:
+  - url: https://nfl-prediction-api-998125712772.us-central1.run.app
+paths:
+  /health:
+    get:
+      summary: Health check for the model service
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /predict:
+    get:
+      summary: Predict outcome and betting analysis for a matchup
+      operationId: predictMatchup
+      parameters:
+        - in: query
+          name: home
+          required: true
+          description: Home team NFL abbreviation (e.g., KC, SF)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+        - in: query
+          name: away
+          required: true
+          description: Away team NFL abbreviation (e.g., BUF, DAL)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+      responses:
+        '200':
+          description: Prediction result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictResponse'
+        '400':
+          description: Missing or invalid parameters
+        '500':
+          description: Internal error
+
+components:
+  schemas:
+    TeamAbbr:
+      type: string
+      description: Official NFL team abbreviation
+      enum:
+        - 'ARI'
+        - 'ATL'
+        - 'BAL'
+        - 'BUF'
+        - 'CAR'
+        - 'CHI'
+        - 'CIN'
+        - 'CLE'
+        - 'DAL'
+        - 'DEN'
+        - 'DET'
+        - 'GB'
+        - 'HOU'
+        - 'IND'
+        - 'JAX'
+        - 'KC'
+        - 'LAC'
+        - 'LAR'
+        - 'LV'
+        - 'MIA'
+        - 'MIN'
+        - 'NE'
+        - 'NO'
+        - 'NYG'
+        - 'NYJ'
+        - 'PHI'
+        - 'PIT'
+        - 'SEA'
+        - 'SF'
+        - 'TB'
+        - 'TEN'
+        - 'WAS'
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, error]
+        models_loaded:
+          type: object
+          properties:
+            with_odds:
+              type: boolean
+            without_odds:
+              type: boolean
+        debug_info:
+          type: object
+          additionalProperties: true
+
+    PredictResponse:
+      type: object
+      properties:
+        matchup:
+          type: string
+          example: BUF @ KC
+        game_prediction:
+          type: object
+          properties:
+            winner:
+              type: string
+              example: KC
+            home_win_probability:
+              type: string
+              example: 62.5%
+            away_win_probability:
+              type: string
+              example: 37.5%
+            confidence_level:
+              type: string
+        score_prediction:
+          type: object
+          properties:
+            home_team_score:
+              type: number
+              format: float
+              example: 26.2
+            away_team_score:
+              type: number
+              format: float
+              example: 19.1
+            predicted_margin:
+              type: string
+              example: KC by 7.1
+            predicted_total_points:
+              type: number
+              format: float
+              example: 45.3
+        betting_analysis:
+          type: object
+          properties:
+            spread:
+              type: object
+              properties:
+                vegas_line:
+                  oneOf:
+                    - type: number
+                      format: float
+                    - type: string
+                      example: N/A
+                predicted_spread:
+                  type: number
+                  format: float
+                recommendation:
+                  type: string
+                confidence:
+                  type: string
+            total:
+              type: object
+              properties:
+                vegas_total:
+                  oneOf:
+                    - type: number
+                      format: float
+                    - type: string
+                      example: N/A
+                predicted_total:
+                  type: number
+                  format: float
+                recommendation:
+                  type: string
+                confidence:
+                  type: string
+            moneyline:
+              type: object
+              properties:
+                recommendation:
+                  type: string
+                model_edge:
+                  type: string
+                  example: +3.5%
+        model_details:
+          type: object
+          properties:
+            prediction_type:
+              type: string
+              example: Advanced Analytics Model
+            key_factors:
+              type: object
+              additionalProperties: true
+            data_sources:
+              type: string
+            features_used:
+              type: object
+              additionalProperties: true
+      additionalProperties: true
