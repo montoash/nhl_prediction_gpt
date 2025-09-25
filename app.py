@@ -35,13 +35,26 @@ def load_models():
     if model_with_odds is None:
         try:
             logger.info("Loading ML models...")
+            
+            # Load each component individually with detailed logging
+            logger.info("Loading model with odds...")
             model_with_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'))
+            
+            logger.info("Loading features with odds...")
             features_with_odds = joblib.load(os.path.join(MODELS_DIR, 'features_with_odds.pkl'))
+            
+            logger.info("Loading model without odds...")
             model_no_odds = joblib.load(os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'))
+            
+            logger.info("Loading features without odds...")
             features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
-            logger.info("Models loaded successfully")
+            
+            logger.info(f"Models loaded successfully - Features with odds: {len(features_with_odds)}, without odds: {len(features_no_odds)}")
+            
         except Exception as e:
+            import traceback
             logger.error(f"Model loading failed: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Could not load ML models: {e}")
     
     return model_with_odds, features_with_odds, model_no_odds, features_no_odds
