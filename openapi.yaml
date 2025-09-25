@@ -96,15 +96,35 @@ paths:
             $ref: '#/components/schemas/TeamAbbr'
       responses:
         '200':
-          description: Prediction result
+          description: Live odds data
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PredictResponse'
+                $ref: '#/components/schemas/OddsResponse'
         '400':
           description: Missing or invalid parameters
         '500':
           description: Internal error
+
+  /_ai/echo:
+    get:
+      summary: Debug echo for Action connectivity (no auth)
+      operationId: echo
+      parameters:
+        - in: query
+          name: ping
+          required: false
+          description: Optional test parameter
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Echo response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
 
 components:
   schemas:
@@ -245,3 +265,74 @@ components:
               type: object
               additionalProperties: true
       additionalProperties: true
+
+    OddsResponse:
+      type: object
+      description: Live odds response. If home and away are provided, returns odds for that game; otherwise returns list of games.
+      properties:
+        game:
+          type: string
+          example: BUF @ KC
+        odds:
+          type: object
+          properties:
+            spread_line:
+              oneOf:
+                - type: number
+                  format: float
+                - type: 'null'
+            total_line:
+              oneOf:
+                - type: number
+                  format: float
+                - type: 'null'
+            home_moneyline:
+              oneOf:
+                - type: number
+                - type: 'null'
+            away_moneyline:
+              oneOf:
+                - type: number
+                - type: 'null'
+            implied_home_prob:
+              oneOf:
+                - type: number
+                  format: float
+                - type: 'null'
+            source:
+              type: string
+        total_games:
+          type: integer
+          example: 16
+        games:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              home_team:
+                $ref: '#/components/schemas/TeamAbbr'
+              away_team:
+                $ref: '#/components/schemas/TeamAbbr'
+              spread_line:
+                oneOf:
+                  - type: number
+                    format: float
+                  - type: 'null'
+              total_line:
+                oneOf:
+                  - type: number
+                    format: float
+                  - type: 'null'
+              home_moneyline:
+                oneOf:
+                  - type: number
+                  - type: 'null'
+              away_moneyline:
+                oneOf:
+                  - type: number
+                  - type: 'null'
+              source:
+                type: string
+        last_updated:
+          type: string
+          format: date-time

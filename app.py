@@ -19,12 +19,26 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Log every incoming request (method, path, args, and minimal headers)
+@app.before_request
+def log_request_info():
+    try:
+        ua = request.headers.get('User-Agent', 'unknown')
+        rid = request.headers.get('X-Request-ID') or request.headers.get('X-Correlation-ID')
+        logger.info(f"Incoming request: {request.method} {request.path} args={dict(request.args)} ua='{ua}' rid={rid}")
+    except Exception:
+        # Avoid breaking requests due to logging issues
+        pass
+
 # Add CORS headers to all responses for GPT Action compatibility
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Echo or set a simple request id for easier log correlation
+    if not response.headers.get('X-Request-ID'):
+        response.headers['X-Request-ID'] = request.headers.get('X-Request-ID', request.headers.get('X-Correlation-ID', 'no-id'))
     return response
 
 # Resolve models directory relative to repository root
@@ -457,6 +471,45 @@ def serve_openapi_spec():
     except TypeError:
         # Fallback for older Flask versions where send_from_directory uses filename arg
         return send_from_directory(directory=repo_root, filename='openapi.yaml', mimetype='application/yaml')
+
+@app.route('/openapi.json', methods=['GET', 'OPTIONS'])
+def serve_openapi_json():
+    """Serve the OpenAPI spec as JSON (some importers prefer JSON)."""
+    try:
+        import json
+        import yaml  # PyYAML
+        import os
+        repo_root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(repo_root, 'openapi.yaml'), 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        return app.response_class(response=json.dumps(data), status=200, mimetype='application/json')
+    except Exception as e:
+        logger.warning(f"Failed to serve openapi.json: {e}")
+        return jsonify({'error': 'Failed to load OpenAPI spec', 'details': str(e)}), 500
+
+@app.route('/_ai/echo', methods=['GET', 'POST', 'OPTIONS'])
+def echo():
+    """Tiny echo endpoint to verify Action connectivity and inspect payloads."""
+    try:
+        payload = None
+        if request.method == 'POST':
+            try:
+                payload = request.get_json(silent=True)
+            except Exception:
+                payload = None
+        return jsonify({
+            'method': request.method,
+            'path': request.path,
+            'args': request.args.to_dict(flat=True),
+            'json': payload,
+            'headers': {
+                'User-Agent': request.headers.get('User-Agent'),
+                'X-Request-ID': request.headers.get('X-Request-ID') or request.headers.get('X-Correlation-ID')
+            },
+            'note': 'This endpoint is for debugging GPT Action connectivity.'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/odds', methods=['GET', 'OPTIONS'])
 def get_odds():
