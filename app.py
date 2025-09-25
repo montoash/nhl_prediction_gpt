@@ -122,10 +122,17 @@ def get_minimal_features_no_data(home_team, away_team):
 # --- DATA-FREE feature extraction for memory-constrained environments ---
 # --- Helper function to get features for a matchup ---
 def get_latest_features(home_team_abbr, away_team_abbr):
-    """Get features with fallback for memory-constrained environments"""
+    """Get features with fallback for memory-constrained environments.
+    By default, use ultra-lightweight features to ensure fast responses for Actions.
+    Set ENABLE_FULL_FEATURES=1 to attempt heavier nfl_data_py features.
+    """
     logger.info(f"Fetching features for {home_team_abbr} vs {away_team_abbr}")
-    
-    # Try full feature extraction first, fallback to lightweight if OOM
+
+    use_full = os.environ.get('ENABLE_FULL_FEATURES', '0') == '1'
+    if not use_full:
+        return get_minimal_features_no_data(home_team_abbr, away_team_abbr)
+
+    # Attempt full feature extraction when explicitly enabled
     try:
         return get_full_features(home_team_abbr, away_team_abbr)
     except Exception as e:
@@ -412,16 +419,120 @@ def predict():
             model_with_odds_loaded, features_with_odds_loaded, model_no_odds_loaded, features_no_odds_loaded = load_models()
         except Exception as e:
             logger.error(f"Model loading failed: {e}")
-            # Return fallback prediction if models can't load
-            return jsonify({
-                'home_team': home_team,
-                'away_team': away_team,
-                'calibrated_home_win_prob': "60.00%",
-                'conformal_prediction_set': ["Home Win", "Away Win"],
-                'prediction_type': 'Fallback Heuristics (Models Unavailable)',
-                'model_features_used': features_df.to_dict('records')[0],
-                'error': f'ML models could not be loaded: {str(e)}'
-            })
+            # Return a schema-consistent fallback prediction if models can't load
+            # Heuristic probability derived from feature differential
+            features = features_df.iloc[0]
+            off_diff = float(features.get('off_epa_diff', 0) or 0)
+            def_diff = float(features.get('def_epa_allowed_diff', 0) or 0)
+
+            # Map offensive differential to a reasonable win probability
+            # Centered at 0.5, scaled and clipped to avoid extremes
+            home_win_prob = max(0.05, min(0.95, 0.5 + off_diff * 0.15))
+            away_win_prob = 1 - home_win_prob
+
+            import math
+            # Convert probability to implied spread
+            if home_win_prob > 0.999:
+                home_win_prob = 0.999
+            elif home_win_prob < 0.001:
+                home_win_prob = 0.001
+            predicted_spread = -14 * math.log((1 - home_win_prob) / home_win_prob)
+
+            # Predict total points based on offensive/defensive diffs
+            base_total = 45
+            total_adjustment = (off_diff - def_diff) * 10
+            predicted_total = base_total + total_adjustment
+            home_score = (predicted_total + predicted_spread) / 2
+            away_score = (predicted_total - predicted_spread) / 2
+            home_score = max(10, min(50, home_score))
+            away_score = max(10, min(50, away_score))
+            predicted_total = home_score + away_score
+
+            actual_spread = features.get('spread_line')
+            actual_total = features.get('total_line')
+
+            # Recommendations without models
+            spread_recommendation = "No Line Available"
+            spread_confidence = "N/A"
+            if actual_spread is not None and not pd.isna(actual_spread):
+                spread_diff = predicted_spread - actual_spread
+                if abs(spread_diff) > 3:
+                    spread_recommendation = f"Take {'Home' if spread_diff > 0 else 'Away'} ({spread_diff:+.1f} point edge)"
+                    spread_confidence = "Medium"
+                else:
+                    spread_recommendation = "No Strong Edge"
+                    spread_confidence = "Low"
+
+            total_recommendation = "No Line Available"
+            total_confidence = "N/A"
+            if actual_total is not None and not pd.isna(actual_total):
+                total_diff = predicted_total - actual_total
+                if abs(total_diff) > 3:
+                    total_recommendation = f"{'Over' if total_diff > 0 else 'Under'} ({total_diff:+.1f} point edge)"
+                    total_confidence = "Medium"
+                else:
+                    total_recommendation = "No Strong Edge"
+                    total_confidence = "Low"
+
+            implied_home_prob_odds = features.get('implied_home_prob')
+            moneyline_recommendation = "No Odds Available"
+            moneyline_value = 0
+            if implied_home_prob_odds is not None and not pd.isna(implied_home_prob_odds):
+                moneyline_value = home_win_prob - float(implied_home_prob_odds)
+                if abs(moneyline_value) > 0.05:
+                    moneyline_recommendation = f"{'Home' if moneyline_value > 0 else 'Away'} (+{abs(moneyline_value)*100:.1f}% edge)"
+                else:
+                    moneyline_recommendation = "Fair Value"
+
+            plausible_outcomes = ["Home Win"] if home_win_prob >= 0.55 else (["Away Win"] if home_win_prob <= 0.45 else ["Home Win", "Away Win"])
+
+            result = {
+                'matchup': f"{away_team} @ {home_team}",
+                'game_prediction': {
+                    'winner': home_team if home_win_prob > 0.5 else away_team,
+                    'home_win_probability': f"{home_win_prob:.1%}",
+                    'away_win_probability': f"{away_win_prob:.1%}",
+                    'confidence_level': plausible_outcomes[0] if len(plausible_outcomes) == 1 else 'Low Confidence'
+                },
+                'score_prediction': {
+                    'home_team_score': round(home_score, 1),
+                    'away_team_score': round(away_score, 1),
+                    'predicted_margin': f"{home_team} by {abs(predicted_spread):.1f}" if predicted_spread > 0 else f"{away_team} by {abs(predicted_spread):.1f}",
+                    'predicted_total_points': round(predicted_total, 1)
+                },
+                'betting_analysis': {
+                    'spread': {
+                        'vegas_line': actual_spread if actual_spread is not None and not pd.isna(actual_spread) else 'N/A',
+                        'predicted_spread': round(predicted_spread, 1),
+                        'recommendation': spread_recommendation,
+                        'confidence': spread_confidence
+                    },
+                    'total': {
+                        'vegas_total': actual_total if actual_total is not None and not pd.isna(actual_total) else 'N/A',
+                        'predicted_total': round(predicted_total, 1),
+                        'recommendation': total_recommendation,
+                        'confidence': total_confidence
+                    },
+                    'moneyline': {
+                        'recommendation': moneyline_recommendation,
+                        'model_edge': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A'
+                    }
+                },
+                'model_details': {
+                    'prediction_type': 'Fallback Heuristics (Models Unavailable)',
+                    'key_factors': {
+                        'offensive_advantage': f"{home_team if off_diff > 0 else away_team} (+{abs(off_diff):.3f} EPA/play)",
+                        'defensive_advantage': f"{home_team if def_diff > 0 else away_team} (+{abs(def_diff):.3f} EPA/play allowed)",
+                        'home_field_advantage': "+2.5 points (assumed)"
+                    },
+                    'data_sources': 'Heuristics (no model available)',
+                    'features_used': features_df.to_dict('records')[0]
+                },
+                'error': f"ML models could not be loaded: {str(e)}"
+            }
+
+            logger.info(f"Fallback prediction (no models): {result['game_prediction']['winner']} ({result['game_prediction']['home_win_probability']})")
+            return jsonify(result)
 
         # Choose which model to use
         if odds_found:
