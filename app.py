@@ -696,7 +696,14 @@ def predict():
             spread_edge_points = None
             total_edge_points = None
             if actual_spread is not None and not pd.isna(actual_spread):
-                spread_edge_points = predicted_spread - actual_spread
+                # Align with sportsbook convention: market line is home spread (negative if home favored)
+                # Our predicted_spread is positive when the home wins by that many points.
+                predicted_home_spread = -predicted_spread  # home favored -> negative
+                try:
+                    market_home_spread = float(actual_spread)
+                except Exception:
+                    market_home_spread = actual_spread
+                spread_edge_points = abs(predicted_home_spread - market_home_spread)
             if actual_total is not None and not pd.isna(actual_total):
                 total_edge_points = predicted_total - actual_total
 
@@ -796,18 +803,27 @@ def predict():
         try:
             if spread_regressor is not None:
                 Xs = obj_to_2d_row(['off_epa_diff','def_epa_allowed_diff','explosive_diff','turnover_diff','implied_home_prob'])
-                y_spread_pred, spread_interval = spread_regressor.predict(Xs, alpha=0.1, return_pred_int=True)
+                # New format: dict with estimator and residual quantiles
+                est = spread_regressor.get('estimator', spread_regressor)
+                y_spread_pred = est.predict(Xs)
                 predicted_spread = float(y_spread_pred[0])
-                spread_pi = [float(spread_interval[0][0]), float(spread_interval[1][0])] if hasattr(spread_regressor, 'predict') else None
+                ql = spread_regressor['q_low'] if isinstance(spread_regressor, dict) and 'q_low' in spread_regressor else None
+                qh = spread_regressor['q_high'] if isinstance(spread_regressor, dict) and 'q_high' in spread_regressor else None
+                if ql is not None and qh is not None:
+                    spread_pi = [predicted_spread + float(ql), predicted_spread + float(qh)]
         except Exception as e:
             logger.warning(f"Spread regressor predict failed: {e}")
 
         try:
             if total_regressor is not None:
                 Xt = obj_to_2d_row(['off_epa_diff','def_epa_allowed_diff','explosive_diff','turnover_diff','implied_home_prob'])
-                y_total_pred, total_interval = total_regressor.predict(Xt, alpha=0.1, return_pred_int=True)
+                est = total_regressor.get('estimator', total_regressor)
+                y_total_pred = est.predict(Xt)
                 predicted_total = float(y_total_pred[0])
-                total_pi = [float(total_interval[0][0]), float(total_interval[1][0])] if hasattr(total_regressor, 'predict') else None
+                ql = total_regressor['q_low'] if isinstance(total_regressor, dict) and 'q_low' in total_regressor else None
+                qh = total_regressor['q_high'] if isinstance(total_regressor, dict) and 'q_high' in total_regressor else None
+                if ql is not None and qh is not None:
+                    total_pi = [predicted_total + float(ql), predicted_total + float(qh)]
         except Exception as e:
             logger.warning(f"Total regressor predict failed: {e}")
 
@@ -855,11 +871,18 @@ def predict():
         spread_recommendation = "No Line Available"
         spread_confidence = "N/A"
         if actual_spread is not None and not pd.isna(actual_spread):
-            spread_diff = predicted_spread - actual_spread
-            spread_edge_points = spread_diff
-            if abs(spread_diff) > 3:
-                spread_recommendation = f"Take {'Home' if spread_diff > 0 else 'Away'} ({spread_diff:+.1f} point edge)"
-                spread_confidence = "High" if abs(spread_diff) > 6 else "Medium"
+            # Convert predicted to home-line convention (negative when home favored)
+            predicted_home_spread = -predicted_spread
+            try:
+                market_home_spread = float(actual_spread)
+            except Exception:
+                market_home_spread = actual_spread
+            spread_delta = predicted_home_spread - market_home_spread
+            spread_edge_points = abs(spread_delta)
+            pick_side = 'Home' if spread_delta < 0 else 'Away'
+            if spread_edge_points > 3:
+                spread_recommendation = f"Take {pick_side} ({spread_edge_points:+.1f} point edge)"
+                spread_confidence = "High" if spread_edge_points > 6 else "Medium"
             else:
                 spread_recommendation = "No Strong Edge"
                 spread_confidence = "Low"
