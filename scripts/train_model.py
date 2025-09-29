@@ -4,7 +4,9 @@ import nfl_data_py as nfl
 import pandas as pd
 import xgboost as xgb
 from mapie.classification import SplitConformalClassifier
+from mapie.regression import MapieRegressor
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import mean_absolute_error
 import joblib
 import os
 from datetime import datetime
@@ -205,3 +207,47 @@ joblib.dump(features_no_odds, os.path.join(MODELS_DIR, 'features_no_odds.pkl'), 
 print("Fallback model saved.")
 
 print("Advanced model training complete. 🚀")
+
+# === Optional: Train spread and total point regressors ===
+if os.getenv('TRAIN_REGRESSORS', '1') == '1':
+    try:
+        print("Training spread and total regressors (optional)...")
+        # True targets from schedule
+        final_df['true_spread'] = (final_df['home_score'] - final_df['away_score']).astype(float)
+        final_df['true_total'] = (final_df['home_score'] + final_df['away_score']).astype(float)
+
+        reg_features = ['off_epa_diff', 'def_epa_allowed_diff', 'explosive_diff', 'turnover_diff', 'implied_home_prob']
+        # Use vegas info when present; allow NaN rows to be dropped per target
+        df_spread = final_df.dropna(subset=reg_features + ['true_spread']).copy()
+        df_total = final_df.dropna(subset=reg_features + ['true_total']).copy()
+
+        def train_reg(df, target):
+            split_idx = int(0.8 * len(df))
+            Xtr, Xva = df[reg_features].iloc[:split_idx], df[reg_features].iloc[split_idx:]
+            ytr, yva = df[target].iloc[:split_idx], df[target].iloc[split_idx:]
+            base = xgb.XGBRegressor(
+                objective='reg:squarederror',
+                max_depth=5,
+                learning_rate=0.05,
+                subsample=0.9,
+                colsample_bytree=0.8,
+                n_estimators=1500,
+                reg_lambda=1.0,
+                tree_method='hist',
+            )
+            base.fit(Xtr, ytr, eval_set=[(Xva, yva)], verbose=False)
+            pred = base.predict(Xva)
+            mae = mean_absolute_error(yva, pred)
+            print(f"{target} MAE: {mae:.2f}")
+            # Conformal interval for spread/total (absolute error)
+            mr = MapieRegressor(estimator=base, method="naive")
+            mr.fit(Xtr, ytr)
+            return mr
+
+        spread_reg = train_reg(df_spread, 'true_spread')
+        total_reg = train_reg(df_total, 'true_total')
+        joblib.dump(spread_reg, os.path.join(MODELS_DIR, 'spread_regressor.pkl'), protocol=2)
+        joblib.dump(total_reg, os.path.join(MODELS_DIR, 'total_regressor.pkl'), protocol=2)
+        print("Regressors saved.")
+    except Exception as e:
+        print(f"Regressor training skipped due to error: {e}")

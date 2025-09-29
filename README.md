@@ -7,7 +7,7 @@ A production-ready NFL win prediction system using **state-of-the-art data scien
 - **XGBoost** with optimized hyperparameters and regularization
 - **Isotonic Calibration** for trustworthy probability estimates  
 - **Conformal Prediction** (MAPIE) for uncertainty quantification with 95% statistical guarantees
-- **Vegas Integration** with implied probability from moneylines and vig removal
+- **Vegas Integration** with consensus odds across books (The Odds API) + implied probability and vig removal
 - **Advanced Features** including offensive/defensive EPA, explosive play rates, turnover differentials
 - **Robust Fallbacks** for missing data and multiple prediction pathways
 
@@ -61,6 +61,33 @@ python app.py
 # Make predictions
 curl "http://localhost:5000/predict?home=PHI&away=DAL"
 ```
+
+## Endpoints
+
+- GET `/health`
+- GET `/predict?home=KC&away=BUF[&spread=-3.5&total=47.5&home_ml=-150&away_ml=+130]`
+- GET `/odds[?home=KC&away=BUF]`
+- GET `/_ai/echo?ping=hello` (debug Action connectivity)
+- GET `/openapi.yaml` and `/openapi.json` (Action import)
+
+## Training
+
+```bash
+# Full training (2018-<current year>)
+python scripts/train_model.py
+
+# Include optional spread/total regressors
+TRAIN_REGRESSORS=1 python scripts/train_model.py
+
+# Quick training on single season
+START_SEASON=2023 END_SEASON=2023 python scripts/train_model.py
+```
+
+Artifacts in `models/`:
+- nfl_win_predictor_with_odds.pkl / features_with_odds.pkl
+- nfl_win_predictor_no_odds.pkl / features_no_odds.pkl
+- spread_regressor.pkl (optional)
+- total_regressor.pkl (optional)
 
 ## 🚀 Deployment to Render.com
 

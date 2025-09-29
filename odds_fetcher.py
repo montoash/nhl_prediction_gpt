@@ -96,52 +96,104 @@ def fetch_odds_api(api_key=None, sport='americanfootball_nfl'):
         odds_data = response.json()
         logger.info(f"Fetched {len(odds_data)} games from Odds API")
         
-        # Transform to our format
+        # Transform to our format with consensus across books
         games = {}
         for game in odds_data:
             home_team = normalize_team_name(game['home_team'])
             away_team = normalize_team_name(game['away_team'])
-            
             if not home_team or not away_team:
                 continue
-                
             game_key = f"{away_team}@{home_team}"
-            
-            # Extract odds from bookmakers (use first available)
-            spread_line = None
-            total_line = None
-            home_ml = None
-            away_ml = None
-            
+
+            spread_points = []
+            total_points = []
+            home_prices = []
+            away_prices = []
+            book_list = []
+
             for bookmaker in game.get('bookmakers', []):
-                for market in bookmaker.get('markets', []):
-                    if market['key'] == 'spreads' and spread_line is None:
-                        for outcome in market['outcomes']:
-                            if normalize_team_name(outcome['name']) == home_team:
-                                spread_line = outcome['point']
-                    elif market['key'] == 'totals' and total_line is None:
-                        for outcome in market['outcomes']:
-                            if outcome['name'] == 'Over':
-                                total_line = outcome['point']
-                    elif market['key'] == 'h2h':
-                        for outcome in market['outcomes']:
-                            team = normalize_team_name(outcome['name'])
-                            if team == home_team and home_ml is None:
-                                home_ml = outcome['price']
-                            elif team == away_team and away_ml is None:
-                                away_ml = outcome['price']
-            
+                book_key = bookmaker.get('key') or bookmaker.get('title')
+                markets = bookmaker.get('markets', [])
+                book_spread = None
+                book_total = None
+                book_home_price = None
+                book_away_price = None
+
+                for market in markets:
+                    key = market.get('key')
+                    outcomes = market.get('outcomes', [])
+                    if key == 'spreads':
+                        for outcome in outcomes:
+                            if normalize_team_name(outcome.get('name', '')) == home_team and outcome.get('point') is not None:
+                                book_spread = outcome['point']
+                                break
+                    elif key == 'totals':
+                        # take the Over point as the line
+                        for outcome in outcomes:
+                            if outcome.get('name') == 'Over' and outcome.get('point') is not None:
+                                book_total = outcome['point']
+                                break
+                    elif key == 'h2h':
+                        for outcome in outcomes:
+                            team = normalize_team_name(outcome.get('name', ''))
+                            if team == home_team and outcome.get('price') is not None:
+                                book_home_price = outcome['price']
+                            elif team == away_team and outcome.get('price') is not None:
+                                book_away_price = outcome['price']
+
+                if book_spread is not None:
+                    spread_points.append(book_spread)
+                if book_total is not None:
+                    total_points.append(book_total)
+                if book_home_price is not None:
+                    home_prices.append(book_home_price)
+                if book_away_price is not None:
+                    away_prices.append(book_away_price)
+                if book_key:
+                    book_list.append(book_key)
+
+            def mean(vals):
+                try:
+                    return sum(vals) / len(vals) if vals else None
+                except Exception:
+                    return None
+
+            # Convert American odds to probabilities and average across books to reduce vig bias
+            def american_to_prob(ml):
+                try:
+                    ml = float(ml)
+                except Exception:
+                    return None
+                if ml < 0:
+                    return (-ml) / ((-ml) + 100)
+                else:
+                    return 100 / (ml + 100)
+
+            probs_home = [american_to_prob(p) for p in home_prices if p is not None]
+            probs_away = [american_to_prob(p) for p in away_prices if p is not None]
+            implied_home_prob = None
+            if probs_home and probs_away:
+                # Normalize each book’s pair by dividing by sum, then average across books
+                per_book_probs = []
+                for ph, pa in zip(probs_home, probs_away):
+                    if ph is None or pa is None or (ph + pa) == 0:
+                        continue
+                    per_book_probs.append(ph / (ph + pa))
+                implied_home_prob = mean(per_book_probs) if per_book_probs else None
+
             games[game_key] = {
                 'home_team': home_team,
                 'away_team': away_team,
-                'spread_line': spread_line,
-                'total_line': total_line,
-                'home_moneyline': home_ml,
-                'away_moneyline': away_ml,
-                'source': 'odds_api',
+                'spread_line': mean(spread_points),
+                'total_line': mean(total_points),
+                'home_moneyline': mean(home_prices),
+                'away_moneyline': mean(away_prices),
+                'implied_home_prob': implied_home_prob,
+                'source': 'odds_api_consensus',
+                'book_count': len(book_list),
                 'timestamp': datetime.now().isoformat()
             }
-            
+
         return games
         
     except Exception as e:

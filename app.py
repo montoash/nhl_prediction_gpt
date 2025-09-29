@@ -34,8 +34,11 @@ def log_request_info():
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Echo requested headers for preflight compatibility; default to common headers
+    requested_headers = request.headers.get('Access-Control-Request-Headers', 'Content-Type,Authorization')
+    response.headers['Access-Control-Allow-Headers'] = requested_headers or 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+    response.headers['Access-Control-Max-Age'] = '600'
     # Echo or set a simple request id for easier log correlation
     if not response.headers.get('X-Request-ID'):
         response.headers['X-Request-ID'] = request.headers.get('X-Request-ID', request.headers.get('X-Correlation-ID', 'no-id'))
@@ -50,6 +53,8 @@ model_with_odds = None
 features_with_odds = None
 model_no_odds = None
 features_no_odds = None
+spread_regressor = None
+total_regressor = None
 
 def load_models():
     """Load models with error handling"""
@@ -72,6 +77,20 @@ def load_models():
             logger.info("Loading features without odds...")
             features_no_odds = joblib.load(os.path.join(MODELS_DIR, 'features_no_odds.pkl'))
             
+            # Optional regressors
+            try:
+                global spread_regressor, total_regressor
+                spread_path = os.path.join(MODELS_DIR, 'spread_regressor.pkl')
+                total_path = os.path.join(MODELS_DIR, 'total_regressor.pkl')
+                if os.path.exists(spread_path):
+                    spread_regressor = joblib.load(spread_path)
+                    logger.info("Loaded spread_regressor.pkl")
+                if os.path.exists(total_path):
+                    total_regressor = joblib.load(total_path)
+                    logger.info("Loaded total_regressor.pkl")
+            except Exception as re:
+                logger.warning(f"Could not load regressors: {re}")
+
             logger.info(f"Models loaded successfully - Features with odds: {len(features_with_odds)}, without odds: {len(features_no_odds)}")
             
         except Exception as e:
@@ -413,6 +432,10 @@ def health():
                 health_info['models_loaded']['with_odds'] = True
                 health_info['models_loaded']['without_odds'] = True
                 health_info['debug_info']['models_loaded'] = 'success'
+                health_info['debug_info']['regressors'] = {
+                    'spread': spread_regressor is not None,
+                    'total': total_regressor is not None,
+                }
             except Exception as model_error:
                 health_info['status'] = 'degraded'
                 health_info['debug_info']['model_error'] = str(model_error)
@@ -757,32 +780,49 @@ def predict():
         # Enhanced predictions with scores, spreads, and betting analysis
         away_win_prob = 1 - home_win_prob
         
-        # Score prediction based on win probability (ensures consistency)
-        # Convert win probability to point spread using logistic regression inverse
-        # P(win) = 1 / (1 + exp(-spread/14)) -> spread = -14 * ln((1-p)/p)
-        import math
-        if home_win_prob > 0.999:
-            home_win_prob = 0.999  # Prevent division by zero
-        elif home_win_prob < 0.001:
-            home_win_prob = 0.001
-        
-        predicted_spread = -14 * math.log((1 - home_win_prob) / home_win_prob)
-        
-        # Predict total points based on team features
+        # Pro-grade spread/total via regressors if available; else use probability-based fallback
         features = features_df.iloc[0]
         off_diff = features.get('off_epa_diff', 0)
         def_diff = features.get('def_epa_allowed_diff', 0)
-        
-        # Total points: league average ~45, adjust based on offensive/defensive strength
-        base_total = 45
-        total_adjustment = (off_diff - def_diff) * 10  # More offense = higher total
-        predicted_total = base_total + total_adjustment
-        
-        # Calculate individual scores from spread and total
+
+        def obj_to_2d_row(cols):
+            return pd.DataFrame([[features.get(c, np.nan) for c in cols]], columns=cols)
+
+        predicted_spread = None
+        predicted_total = None
+        spread_pi = None
+        total_pi = None
+
+        try:
+            if spread_regressor is not None:
+                Xs = obj_to_2d_row(['off_epa_diff','def_epa_allowed_diff','explosive_diff','turnover_diff','implied_home_prob'])
+                y_spread_pred, spread_interval = spread_regressor.predict(Xs, alpha=0.1, return_pred_int=True)
+                predicted_spread = float(y_spread_pred[0])
+                spread_pi = [float(spread_interval[0][0]), float(spread_interval[1][0])] if hasattr(spread_regressor, 'predict') else None
+        except Exception as e:
+            logger.warning(f"Spread regressor predict failed: {e}")
+
+        try:
+            if total_regressor is not None:
+                Xt = obj_to_2d_row(['off_epa_diff','def_epa_allowed_diff','explosive_diff','turnover_diff','implied_home_prob'])
+                y_total_pred, total_interval = total_regressor.predict(Xt, alpha=0.1, return_pred_int=True)
+                predicted_total = float(y_total_pred[0])
+                total_pi = [float(total_interval[0][0]), float(total_interval[1][0])] if hasattr(total_regressor, 'predict') else None
+        except Exception as e:
+            logger.warning(f"Total regressor predict failed: {e}")
+
+        if predicted_spread is None or predicted_total is None:
+            # Fallback: map win prob to spread and use feature-derived total
+            import math
+            p = max(0.001, min(0.999, home_win_prob))
+            predicted_spread = -14 * math.log((1 - p) / p)
+            base_total = 45
+            total_adjustment = (off_diff - def_diff) * 10
+            predicted_total = base_total + total_adjustment
+
+        # Calculate individual scores from spread and total, with reasonable bounds
         home_score = (predicted_total + predicted_spread) / 2
         away_score = (predicted_total - predicted_spread) / 2
-        
-        # Ensure reasonable score bounds
         home_score = max(10, min(50, home_score))
         away_score = max(10, min(50, away_score))
         predicted_total = home_score + away_score
@@ -837,7 +877,7 @@ def predict():
                 total_recommendation = "No Strong Edge" 
                 total_confidence = "Low"
         
-        # Moneyline value analysis
+    # Moneyline value analysis
         # Derive implied probability from moneylines if provided
         implied_home_prob_odds = None
         try:
@@ -863,6 +903,48 @@ def predict():
             else:
                 moneyline_recommendation = "Fair Value"
 
+        # Expected Value and Kelly stake suggestions where possible
+        def prob_to_american(p):
+            # Convert probability to fair American odds
+            if p <= 0 or p >= 1:
+                return None
+            if p > 0.5:
+                return -int(round(100 * p / (1 - p)))
+            else:
+                return int(round(100 * (1 - p) / p))
+
+        def kelly_fraction(p, american_odds):
+            # Kelly with American odds
+            try:
+                if american_odds is None:
+                    return None
+                if american_odds > 0:
+                    b = american_odds / 100.0
+                else:
+                    b = 100.0 / abs(american_odds)
+                q = 1 - p
+                f = (b*p - q) / b
+                return max(0.0, f)
+            except Exception:
+                return None
+
+        # Derive book MLs either from query or market
+        market_home_ml = None
+        market_away_ml = None
+        if q_home_ml is not None and q_away_ml is not None:
+            try:
+                market_home_ml = float(q_home_ml)
+                market_away_ml = float(q_away_ml)
+            except Exception:
+                pass
+        elif market:
+            market_home_ml = market.get('home_moneyline')
+            market_away_ml = market.get('away_moneyline')
+
+        # Kelly suggestions for moneyline if we have market MLs
+        kelly_home = kelly_fraction(home_win_prob, market_home_ml) if market_home_ml is not None else None
+        kelly_away = kelly_fraction(1 - home_win_prob, market_away_ml) if market_away_ml is not None else None
+
         result = {
             'matchup': f"{away_team} @ {home_team}",
             'game_prediction': {
@@ -886,18 +968,24 @@ def predict():
                 'spread': {
                     'vegas_line': actual_spread if actual_spread is not None and not pd.isna(actual_spread) else 'N/A',
                     'predicted_spread': round(predicted_spread, 1),
+                    'predicted_interval': spread_pi,
                     'recommendation': spread_recommendation,
                     'confidence': spread_confidence
                 },
                 'total': {
                     'vegas_total': actual_total if actual_total is not None and not pd.isna(actual_total) else 'N/A', 
                     'predicted_total': round(predicted_total, 1),
+                    'predicted_interval': total_pi,
                     'recommendation': total_recommendation,
                     'confidence': total_confidence
                 },
                 'moneyline': {
                     'recommendation': moneyline_recommendation,
-                    'model_edge': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A'
+                    'model_edge': f"{moneyline_value*100:+.1f}%" if moneyline_value != 0 else 'N/A',
+                    'kelly_fraction_home': round(kelly_home, 3) if kelly_home is not None else 'N/A',
+                    'kelly_fraction_away': round(kelly_away, 3) if kelly_away is not None else 'N/A',
+                    'fair_home_american': prob_to_american(home_win_prob),
+                    'fair_away_american': prob_to_american(away_win_prob),
                 }
             },
             'model_details': {
@@ -907,7 +995,7 @@ def predict():
                     'defensive_advantage': f"{home_team if def_diff > 0 else away_team} (+{abs(def_diff):.3f} EPA/play allowed)",
                     'home_field_advantage': "+2.5 points (included in model)"
                 },
-                'data_sources': 'NFL play-by-play data (2024 season)' + (' + Vegas odds' if odds_found else ''),
+                'data_sources': 'NFL play-by-play data (2018-'+str(datetime.now().year)+')' + (' + Vegas odds' if odds_found else ''),
                 'features_used': features_df.to_dict('records')[0]
             }
         }
