@@ -6,7 +6,8 @@ echo "🏒 Deploying NHL Prediction API to Cloud Run..."
 # Set your Google Cloud project ID
 PROJECT_ID="nhl-prediction-gpt-455856529947"
 REGION="us-central1"
-SERVICE_NAME="nhl-prediction-api"
+# Align with the live service name used in the URL: https://nhl-prediction-gpt-455856529947.us-central1.run.app
+SERVICE_NAME="nhl-prediction-gpt"
 
 echo "📦 Building Docker image..."
 docker build -t gcr.io/$PROJECT_ID/$SERVICE_NAME -f Dockerfile.cloudrun .
@@ -24,7 +25,10 @@ gcloud run deploy $SERVICE_NAME \
   --cpu 2 \
   --timeout 300s \
   --concurrency 80 \
-  --max-instances 10
+  --max-instances 10 \
+  --set-env-vars GIT_SHA=$(git rev-parse --short HEAD),APP_VARIANT=NHL \
+  --set-env-vars ODDS_SPORT_KEYS="icehockey_nhl,icehockey_nhl_preseason" \
+  ${ODDS_API_KEY:+--set-env-vars ODDS_API_KEY=$ODDS_API_KEY}
 
 echo "✅ Deployment complete!"
 echo "🔗 Your NHL API is available at:"

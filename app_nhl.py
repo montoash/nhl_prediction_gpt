@@ -226,10 +226,22 @@ def health():
             })
         health_info['model_files'] = model_files
         
-        # Memory usage
-        import psutil
-        process = psutil.Process(os.getpid())
-        health_info['memory_usage_mb'] = round(process.memory_info().rss / 1024 / 1024, 2)
+        # Memory usage (read from /proc to avoid external deps)
+        try:
+            rss_kb = None
+            with open('/proc/self/status', 'r') as f:
+                for line in f:
+                    if line.startswith('VmRSS:'):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            rss_kb = float(parts[1])
+                            break
+            if rss_kb is not None:
+                health_info['memory_usage_mb'] = round(rss_kb / 1024.0, 2)
+            else:
+                health_info['memory_usage_mb'] = None
+        except Exception:
+            health_info['memory_usage_mb'] = None
         
         health_info['status'] = 'healthy'
     except Exception as e:
@@ -368,17 +380,25 @@ def get_odds():
         else:
             # Get all current odds
             try:
-                all_odds = get_live_odds()
+                force = request.args.get('nocache') == '1'
+                cache_mins = request.args.get('cache_minutes')
+                try:
+                    cache_mins = int(cache_mins) if cache_mins is not None else 10
+                except Exception:
+                    cache_mins = 10
+                all_odds = get_live_odds(use_cache_minutes=cache_mins, force_refresh=force)
                 games_with_odds = []
-                for game_odds in all_odds:
+                for game_key, odds in (all_odds or {}).items():
+                    # game_key format: "AWAY@HOME"
+                    matchup = game_key.replace('@', ' @ ')
                     games_with_odds.append({
-                        'game': game_odds.get('matchup', 'Unknown'),
+                        'game': matchup,
                         'odds': {
-                            'spread_line': game_odds.get('spread_line'),
-                            'total_line': game_odds.get('total_line'),
-                            'home_moneyline': game_odds.get('home_moneyline'),
-                            'away_moneyline': game_odds.get('away_moneyline'),
-                            'source': game_odds.get('source', 'api')
+                            'spread_line': odds.get('spread_line'),
+                            'total_line': odds.get('total_line'),
+                            'home_moneyline': odds.get('home_moneyline'),
+                            'away_moneyline': odds.get('away_moneyline'),
+                            'source': odds.get('source', 'api')
                         }
                     })
                 
