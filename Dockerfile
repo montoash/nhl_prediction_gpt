@@ -1,4 +1,4 @@
-# Dockerfile
+# Dockerfile - NHL Prediction API
 FROM python:3.11-slim
 
 # Set working directory
@@ -30,5 +30,5 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:10000/health', timeout=10)"
 
-# Start command
-CMD ["gunicorn", "--config", "gunicorn_config.py", "app:app"]
+# Start command for NHL API
+CMD ["gunicorn", "--config", "gunicorn_config.py", "app_nhl:app"]

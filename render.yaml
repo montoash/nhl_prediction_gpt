@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: nfl-prediction-api
+    name: nhl-prediction-api
     env: python
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --config gunicorn_config.py app:app
+    startCommand: gunicorn --config gunicorn_config.py app_nhl:app
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

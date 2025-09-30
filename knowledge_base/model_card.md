@@ -1,6 +1,6 @@
-# NFL Win Prediction Model Card
+# NHL Win Prediction Model Card
 
-**Model Purpose**: To provide a calibrated win probability and an uncertainty-aware prediction set for NFL matchups.
+**Model Purpose**: To provide a calibrated win probability and an uncertainty-aware prediction set for NHL matchups.
 
 **Model Type**: XGBoost Classifier wrapped with a MAPIE Conformal Prediction layer.
 

@@ -1,12 +1,12 @@
 openapi: 3.1.1
 info:
-  title: NFL Prediction API
+  title: NHL Prediction API
   version: 1.0.0
   description: |
-    Predict NFL game outcomes with model probabilities, score predictions, and betting analysis.
+    Predict NHL game outcomes with model probabilities and simple analysis.
     This spec is tailored for use as a Custom GPT Action.
 servers:
-  - url: https://nfl-prediction-api-998125712772.us-central1.run.app
+  - url: https://nhl-prediction-gpt-455856529947.us-central1.run.app
 paths:
   /health:
     get:
@@ -20,51 +20,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
+  /teams:
+    get:
+      summary: Get all NHL teams organized by division
+      operationId: getNHLTeams
+      responses:
+        '200':
+          description: NHL teams by division
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamsResponse'
+
   /predict:
     get:
-      summary: Predict outcome and betting analysis for a matchup
+      summary: Predict outcome for an NHL matchup
       operationId: predictMatchup
       parameters:
         - in: query
           name: home
           required: true
-          description: Home team NFL abbreviation (e.g., KC, SF)
+          description: Home team NHL abbreviation (e.g., TOR, BOS)
           schema:
             $ref: '#/components/schemas/TeamAbbr'
         - in: query
           name: away
           required: true
-          description: Away team NFL abbreviation (e.g., BUF, DAL)
+          description: Away team NHL abbreviation (e.g., MTL, NYR)
           schema:
             $ref: '#/components/schemas/TeamAbbr'
-        - in: query
-          name: spread
-          required: false
-          description: Current point spread (negative favors home, e.g., -3.5)
-          schema:
-            type: number
-            format: float
-        - in: query
-          name: total
-          required: false
-          description: Current total points line (e.g., 47.5)
-          schema:
-            type: number
-            format: float
-        - in: query
-          name: home_ml
-          required: false
-          description: Home moneyline (American odds, e.g., -140)
-          schema:
-            type: number
-            format: float
-        - in: query
-          name: away_ml
-          required: false
-          description: Away moneyline (American odds, e.g., +120)
-          schema:
-            type: number
-            format: float
       responses:
         '200':
           description: Prediction result
@@ -77,69 +61,40 @@ paths:
         '500':
           description: Internal error
 
-  /odds:
-    get:
-      summary: Get live betting odds for NFL games
-      operationId: getLiveOdds
-      parameters:
-        - in: query
-          name: home
-          required: false
-          description: Home team NFL abbreviation (optional, for specific game)
-          schema:
-            $ref: '#/components/schemas/TeamAbbr'
-        - in: query
-          name: away
-          required: false
-          description: Away team NFL abbreviation (optional, for specific game)
-          schema:
-            $ref: '#/components/schemas/TeamAbbr'
-      responses:
-        '200':
-          description: Live odds data
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OddsResponse'
-        '400':
-          description: Missing or invalid parameters
-        '500':
-          description: Internal error
-
-  /_ai/echo:
-    get:
-      summary: Debug echo for Action connectivity (no auth)
-      operationId: echo
-      parameters:
-        - in: query
-          name: ping
-          required: false
-          description: Optional test parameter
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Echo response
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-
 components:
   schemas:
     TeamAbbr:
       type: string
-      description: Official NFL team abbreviation
-      example: KC
-      pattern: '^(ARI|ATL|BAL|BUF|CAR|CHI|CIN|CLE|DAL|DEN|DET|GB|HOU|IND|JAX|KC|LAC|LAR|LV|MIA|MIN|NE|NO|NYG|NYJ|PHI|PIT|SEA|SF|TB|TEN|WAS)$'
+      description: Official NHL team abbreviation
+      example: TOR
+      pattern: '^(ANA|ARI|BOS|BUF|CGY|CAR|CHI|COL|CBJ|DAL|DET|EDM|FLA|LAK|MIN|MTL|NSH|NJD|NYI|NYR|OTT|PHI|PIT|SJS|SEA|STL|TBL|TOR|VAN|VGK|WSH|WPG)$'
+
+    TeamsResponse:
+      type: object
+      properties:
+        Atlantic:
+          type: array
+          items:
+            type: string
+        Metropolitan:
+          type: array
+          items:
+            type: string
+        Central:
+          type: array
+          items:
+            type: string
+        Pacific:
+          type: array
+          items:
+            type: string
 
     HealthResponse:
       type: object
       properties:
         status:
           type: string
-          enum: ['healthy', 'degraded', 'error']
+          description: Overall service status
         models_loaded:
           type: object
           properties:
@@ -147,192 +102,50 @@ components:
               type: boolean
             without_odds:
               type: boolean
-        debug_info:
-          type: object
-          additionalProperties: true
+        memory_usage_mb:
+          type: number
+          format: float
+        model_files:
+          type: array
+          items:
+            type: object
+            properties:
+              filename:
+                type: string
+              exists:
+                type: boolean
+              size_mb:
+                type: number
+                format: float
 
     PredictResponse:
       type: object
       properties:
-        matchup:
-          type: string
-          example: BUF @ KC
-        game_prediction:
+        home_team:
+          $ref: '#/components/schemas/TeamAbbr'
+        away_team:
+          $ref: '#/components/schemas/TeamAbbr'
+        predictions:
           type: object
           properties:
-            winner:
-              type: string
-              example: KC
             home_win_probability:
-              type: string
-              example: 62.5%
+              type: number
+              format: float
             away_win_probability:
-              type: string
-              example: 37.5%
-            confidence_level:
-              type: string
-        edges:
-          type: object
-          properties:
-            spread_points:
-              oneOf:
-                - type: number
-                  format: float
-                - type: string
-                  example: N/A
-            total_points:
-              oneOf:
-                - type: number
-                  format: float
-                - type: string
-                  example: N/A
-            moneyline_percent:
-              type: string
-              example: +5.2%
-        score_prediction:
-          type: object
-          properties:
-            home_team_score:
               type: number
               format: float
-              example: 26.2
-            away_team_score:
-              type: number
-              format: float
-              example: 19.1
-            predicted_margin:
+            confidence_interval:
+              type: array
+              items:
+                type: number
+                format: float
+            prediction:
               type: string
-              example: KC by 7.1
-            predicted_total_points:
-              type: number
-              format: float
-              example: 45.3
-        betting_analysis:
-          type: object
-          properties:
-            spread:
-              type: object
-              properties:
-                vegas_line:
-                  oneOf:
-                    - type: number
-                      format: float
-                    - type: string
-                      example: N/A
-                predicted_spread:
-                  type: number
-                  format: float
-                recommendation:
-                  type: string
-                confidence:
-                  type: string
-            total:
-              type: object
-              properties:
-                vegas_total:
-                  oneOf:
-                    - type: number
-                      format: float
-                    - type: string
-                      example: N/A
-                predicted_total:
-                  type: number
-                  format: float
-                recommendation:
-                  type: string
-                confidence:
-                  type: string
-            moneyline:
-              type: object
-              properties:
-                recommendation:
-                  type: string
-                model_edge:
-                  type: string
-                  example: +3.5%
-        model_details:
-          type: object
-          properties:
-            prediction_type:
-              type: string
-              example: Advanced Analytics Model
-            key_factors:
-              type: object
-              additionalProperties: true
-            data_sources:
-              type: string
-            features_used:
-              type: object
-              additionalProperties: true
-      additionalProperties: true
-
-    OddsResponse:
-      type: object
-      description: Live odds response. If home and away are provided, returns odds for that game; otherwise returns list of games.
-      properties:
-        game:
+              description: Team predicted to win
+        features_used:
+          type: array
+          items:
+            type: string
+        model_type:
           type: string
-          example: BUF @ KC
-        odds:
-          type: object
-          properties:
-            spread_line:
-              oneOf:
-                - type: number
-                  format: float
-                - type: 'null'
-            total_line:
-              oneOf:
-                - type: number
-                  format: float
-                - type: 'null'
-            home_moneyline:
-              oneOf:
-                - type: number
-                - type: 'null'
-            away_moneyline:
-              oneOf:
-                - type: number
-                - type: 'null'
-            implied_home_prob:
-              oneOf:
-                - type: number
-                  format: float
-                - type: 'null'
-            source:
-              type: string
-        total_games:
-          type: integer
-          example: 16
-        games:
-          type: object
-          additionalProperties:
-            type: object
-            properties:
-              home_team:
-                $ref: '#/components/schemas/TeamAbbr'
-              away_team:
-                $ref: '#/components/schemas/TeamAbbr'
-              spread_line:
-                oneOf:
-                  - type: number
-                    format: float
-                  - type: 'null'
-              total_line:
-                oneOf:
-                  - type: number
-                    format: float
-                  - type: 'null'
-              home_moneyline:
-                oneOf:
-                  - type: number
-                  - type: 'null'
-              away_moneyline:
-                oneOf:
-                  - type: number
-                  - type: 'null'
-              source:
-                type: string
-        last_updated:
-          type: string
-          format: date-time
+          description: Model used for prediction (with_odds or without_odds)

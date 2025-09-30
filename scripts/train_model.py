@@ -1,6 +1,6 @@
 # scripts/train_model.py
 
-import nfl_data_py as nfl
+import requests
 import pandas as pd
 import xgboost as xgb
 from mapie.classification import SplitConformalClassifier
@@ -12,7 +12,7 @@ import os
 from datetime import datetime
 import gc # Garbage Collector interface
 
-print("Starting MEMORY-EFFICIENT ADVANCED model training process...")
+print("Starting MEMORY-EFFICIENT ADVANCED NHL model training process...")
 
 # --- 1. Data Ingestion Setup ---
 current_year = datetime.now().year
@@ -170,7 +170,7 @@ calibrated_odds.fit(X_calib, y_calib)
 conformal_model_odds = SplitConformalClassifier(estimator=calibrated_odds, confidence_level=0.95, conformity_score="lac", prefit=True)
 conformal_model_odds.conformalize(X_calib, y_calib)
 
-joblib.dump(conformal_model_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_with_odds.pkl'), protocol=2)
+joblib.dump(conformal_model_odds, os.path.join(MODELS_DIR, 'nhl_win_predictor_with_odds.pkl'), protocol=2)
 joblib.dump(features_with_odds, os.path.join(MODELS_DIR, 'features_with_odds.pkl'), protocol=2)
 print("Primary model saved.")
 
@@ -202,7 +202,7 @@ calibrated_no_odds.fit(X_calib, y_calib)
 conformal_model_no_odds = SplitConformalClassifier(estimator=calibrated_no_odds, confidence_level=0.95, conformity_score="lac", prefit=True)
 conformal_model_no_odds.conformalize(X_calib, y_calib)
 
-joblib.dump(conformal_model_no_odds, os.path.join(MODELS_DIR, 'nfl_win_predictor_no_odds.pkl'), protocol=2)
+joblib.dump(conformal_model_no_odds, os.path.join(MODELS_DIR, 'nhl_win_predictor_no_odds.pkl'), protocol=2)
 joblib.dump(features_no_odds, os.path.join(MODELS_DIR, 'features_no_odds.pkl'), protocol=2)
 print("Fallback model saved.")
 

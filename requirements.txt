@@ -13,7 +13,7 @@ Jinja2==3.1.6
 joblib==1.5.2
 MAPIE==1.1.0
 MarkupSafe==3.0.2
-nfl_data_py==0.3.2
+nhl-api-py==3.0.2
 numpy<2.0.0
 pandas>=2.0,<2.3
 python-dateutil==2.9.0.post0

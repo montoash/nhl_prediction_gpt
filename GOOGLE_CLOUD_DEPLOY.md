@@ -1,15 +1,15 @@
-# Google Cloud Deployment Guide
+# Google Cloud Deployment Guide - NHL Prediction API
 
 ## 🚀 Deploy to Google Cloud Run (Recommended)
 
 ### Prerequisites
 1. **Google Account**: Sign up at [cloud.google.com](https://cloud.google.com)
 2. **Free Credits**: $300 free credits for new accounts
-3. **Project**: Create a new Google Cloud project
+3. **Project**: Create a new Google Cloud project for NHL predictions
 
 ### Method 1: One-Click Deploy (Easiest)
 
-[![Run on Google Cloud](https://deploy.cloud.run/button.svg)](https://deploy.cloud.run/?git_repo=https://github.com/montoash/nfl-prediction-gpt.git&revision=main)
+[![Run on Google Cloud](https://deploy.cloud.run/button.svg)](https://deploy.cloud.run/?git_repo=https://github.com/montoash/nhl-prediction-gpt.git&revision=main)
 
 1. Click the button above
 2. Sign in to Google Cloud

@@ -1,6 +1,6 @@
 # odds_fetcher.py
 """
-Live NFL odds fetcher for real-time edge computation
+Live NHL odds fetcher for real-time edge computation
 Uses multiple sources with fallbacks for reliability
 """
 import requests
@@ -15,39 +15,39 @@ logger = logging.getLogger(__name__)
 
 # Team name mappings to standardize between different odds providers
 TEAM_MAPPINGS = {
-    # Common variations to our abbreviations
-    'Arizona Cardinals': 'ARI', 'Cardinals': 'ARI',
-    'Atlanta Falcons': 'ATL', 'Falcons': 'ATL', 
-    'Baltimore Ravens': 'BAL', 'Ravens': 'BAL',
-    'Buffalo Bills': 'BUF', 'Bills': 'BUF',
-    'Carolina Panthers': 'CAR', 'Panthers': 'CAR',
-    'Chicago Bears': 'CHI', 'Bears': 'CHI',
-    'Cincinnati Bengals': 'CIN', 'Bengals': 'CIN',
-    'Cleveland Browns': 'CLE', 'Browns': 'CLE',
-    'Dallas Cowboys': 'DAL', 'Cowboys': 'DAL',
-    'Denver Broncos': 'DEN', 'Broncos': 'DEN',
-    'Detroit Lions': 'DET', 'Lions': 'DET',
-    'Green Bay Packers': 'GB', 'Packers': 'GB',
-    'Houston Texans': 'HOU', 'Texans': 'HOU',
-    'Indianapolis Colts': 'IND', 'Colts': 'IND',
-    'Jacksonville Jaguars': 'JAX', 'Jaguars': 'JAX',
-    'Kansas City Chiefs': 'KC', 'Chiefs': 'KC',
-    'Los Angeles Chargers': 'LAC', 'Chargers': 'LAC',
-    'Los Angeles Rams': 'LAR', 'Rams': 'LAR',
-    'Las Vegas Raiders': 'LV', 'Raiders': 'LV',
-    'Miami Dolphins': 'MIA', 'Dolphins': 'MIA',
-    'Minnesota Vikings': 'MIN', 'Vikings': 'MIN',
-    'New England Patriots': 'NE', 'Patriots': 'NE',
-    'New Orleans Saints': 'NO', 'Saints': 'NO',
-    'New York Giants': 'NYG', 'Giants': 'NYG',
-    'New York Jets': 'NYJ', 'Jets': 'NYJ',
-    'Philadelphia Eagles': 'PHI', 'Eagles': 'PHI',
-    'Pittsburgh Steelers': 'PIT', 'Steelers': 'PIT',
-    'Seattle Seahawks': 'SEA', 'Seahawks': 'SEA',
-    'San Francisco 49ers': 'SF', '49ers': 'SF',
-    'Tampa Bay Buccaneers': 'TB', 'Buccaneers': 'TB',
-    'Tennessee Titans': 'TEN', 'Titans': 'TEN',
-    'Washington Commanders': 'WAS', 'Commanders': 'WAS',
+    # NHL Teams - Common variations to our abbreviations
+    'Anaheim Ducks': 'ANA', 'Ducks': 'ANA',
+    'Arizona Coyotes': 'ARI', 'Coyotes': 'ARI',
+    'Boston Bruins': 'BOS', 'Bruins': 'BOS',
+    'Buffalo Sabres': 'BUF', 'Sabres': 'BUF',
+    'Calgary Flames': 'CGY', 'Flames': 'CGY',
+    'Carolina Hurricanes': 'CAR', 'Hurricanes': 'CAR',
+    'Chicago Blackhawks': 'CHI', 'Blackhawks': 'CHI',
+    'Colorado Avalanche': 'COL', 'Avalanche': 'COL',
+    'Columbus Blue Jackets': 'CBJ', 'Blue Jackets': 'CBJ',
+    'Dallas Stars': 'DAL', 'Stars': 'DAL',
+    'Detroit Red Wings': 'DET', 'Red Wings': 'DET',
+    'Edmonton Oilers': 'EDM', 'Oilers': 'EDM',
+    'Florida Panthers': 'FLA', 'Panthers': 'FLA',
+    'Los Angeles Kings': 'LAK', 'Kings': 'LAK',
+    'Minnesota Wild': 'MIN', 'Wild': 'MIN',
+    'Montreal Canadiens': 'MTL', 'Canadiens': 'MTL',
+    'Nashville Predators': 'NSH', 'Predators': 'NSH',
+    'New Jersey Devils': 'NJD', 'Devils': 'NJD',
+    'New York Islanders': 'NYI', 'Islanders': 'NYI',
+    'New York Rangers': 'NYR', 'Rangers': 'NYR',
+    'Ottawa Senators': 'OTT', 'Senators': 'OTT',
+    'Philadelphia Flyers': 'PHI', 'Flyers': 'PHI',
+    'Pittsburgh Penguins': 'PIT', 'Penguins': 'PIT',
+    'San Jose Sharks': 'SJS', 'Sharks': 'SJS',
+    'Seattle Kraken': 'SEA', 'Kraken': 'SEA',
+    'St. Louis Blues': 'STL', 'Blues': 'STL',
+    'Tampa Bay Lightning': 'TBL', 'Lightning': 'TBL',
+    'Toronto Maple Leafs': 'TOR', 'Maple Leafs': 'TOR',
+    'Vancouver Canucks': 'VAN', 'Canucks': 'VAN',
+    'Vegas Golden Knights': 'VGK', 'Golden Knights': 'VGK',
+    'Washington Capitals': 'WSH', 'Capitals': 'WSH',
+    'Winnipeg Jets': 'WPG', 'Jets': 'WPG',
 }
 
 def normalize_team_name(team_name):
@@ -55,8 +55,9 @@ def normalize_team_name(team_name):
     if team_name in TEAM_MAPPINGS:
         return TEAM_MAPPINGS[team_name]
     
-    # If already an abbreviation, return as-is
-    if len(team_name) <= 3 and team_name.upper() in ['ARI', 'ATL', 'BAL', 'BUF', 'CAR', 'CHI', 'CIN', 'CLE', 'DAL', 'DEN', 'DET', 'GB', 'HOU', 'IND', 'JAX', 'KC', 'LAC', 'LAR', 'LV', 'MIA', 'MIN', 'NE', 'NO', 'NYG', 'NYJ', 'PHI', 'PIT', 'SEA', 'SF', 'TB', 'TEN', 'WAS']:
+    # If already an abbreviation, return as-is (NHL teams)
+    nhl_teams = ['ANA', 'ARI', 'BOS', 'BUF', 'CGY', 'CAR', 'CHI', 'COL', 'CBJ', 'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NSH', 'NJD', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SJS', 'SEA', 'STL', 'TBL', 'TOR', 'VAN', 'VGK', 'WSH', 'WPG']
+    if len(team_name) <= 3 and team_name.upper() in nhl_teams:
         return team_name.upper()
     
     # Fuzzy matching for common variations
@@ -69,7 +70,7 @@ def normalize_team_name(team_name):
     return team_name
 
 @lru_cache(maxsize=10)
-def fetch_odds_api(api_key=None, sport='americanfootball_nfl'):
+def fetch_odds_api(api_key=None, sport='icehockey_nhl'):
     """
     Fetch odds from The Odds API (api.the-odds-api.com)
     Free tier: 500 requests/month, good for testing
@@ -205,7 +206,7 @@ def fetch_espn_odds():
     Fallback: Scrape ESPN NFL odds (free but less reliable)
     """
     try:
-        url = "http://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+        url = "http://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         
@@ -253,7 +254,7 @@ def fetch_espn_odds():
 @lru_cache(maxsize=1)
 def get_live_odds(use_cache_minutes=10):
     """
-    Get live NFL odds with caching and multiple source fallbacks
+    Get live NHL odds with caching and multiple source fallbacks
     Returns dict of game_key -> odds_data
     """
     cache_key = f"live_odds_{int(time.time() / (use_cache_minutes * 60))}"

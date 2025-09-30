@@ -26,5 +26,5 @@ USER app
 ENV PORT=8080
 EXPOSE 8080
 
-# Start command for Cloud Run
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 app:app
+# Start command for Cloud Run (NHL API)
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 app_nhl:app

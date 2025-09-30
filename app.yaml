@@ -1,4 +1,4 @@
-# app.yaml - App Engine configuration (alternative to Cloud Run)
+# app.yaml - App Engine configuration for NHL Prediction API
 runtime: python311
 
 env_variables:

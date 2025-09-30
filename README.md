@@ -1,14 +1,14 @@
-# NFL State-of-the-Art Prediction System 🏈
+# NHL State-of-the-Art Prediction System �
 
 ## Overview
 
-A production-ready NFL win prediction system using **state-of-the-art data science algorithms** and **mathematical frameworks** for maximum accuracy:
+A production-ready NHL win prediction system using **state-of-the-art data science algorithms** and **mathematical frameworks** for maximum accuracy:
 
 - **XGBoost** with optimized hyperparameters and regularization
 - **Isotonic Calibration** for trustworthy probability estimates  
 - **Conformal Prediction** (MAPIE) for uncertainty quantification with 95% statistical guarantees
 - **Vegas Integration** with consensus odds across books (The Odds API) + implied probability and vig removal
-- **Advanced Features** including offensive/defensive EPA, explosive play rates, turnover differentials
+- **Advanced Features** including goals for/against differentials, powerplay efficiency, shot metrics
 - **Robust Fallbacks** for missing data and multiple prediction pathways
 
 ## Key Features
@@ -20,11 +20,11 @@ A production-ready NFL win prediction system using **state-of-the-art data scien
 - **Conformal prediction sets** provide mathematically-guaranteed uncertainty bounds
 
 ### 📊 Comprehensive Features
-- **Vegas Odds Integration**: Spread lines, totals, moneyline implied probabilities
-- **Offensive Metrics**: EPA per play, explosive play rate (>1.75 EPA), turnover rate
-- **Defensive Metrics**: EPA allowed per play differentials
-- **Rolling Windows**: 4-game moving averages for recency weighting
-- **Smart Differentials**: Home team advantage calculations
+- **Vegas Odds Integration**: Puck lines, totals, moneyline implied probabilities
+- **Offensive Metrics**: Goals per game, shots per game, powerplay percentage
+- **Defensive Metrics**: Goals against per game, penalty kill percentage
+- **Rolling Windows**: 10-game moving averages for recency weighting
+- **Smart Differentials**: Home ice advantage calculations
 
 ### 🔄 Production Architecture
 - **Dual Model System**: Vegas odds model + stats-only fallback
@@ -38,7 +38,7 @@ A production-ready NFL win prediction system using **state-of-the-art data scien
 ```bash
 # Clone and setup
 git clone <repo>
-cd nfl-prediction-gpt
+cd nhl-prediction-gpt
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 ### Training Models
 ```bash
 # Full training (2018-2024)
-python scripts/train_model.py
+python scripts/train_nhl_model.py
 
 # Quick training (single season)
 START_SEASON=2023 END_SEASON=2023 python scripts/train_model.py
@@ -84,8 +84,8 @@ START_SEASON=2023 END_SEASON=2023 python scripts/train_model.py
 ```
 
 Artifacts in `models/`:
-- nfl_win_predictor_with_odds.pkl / features_with_odds.pkl
-- nfl_win_predictor_no_odds.pkl / features_no_odds.pkl
+- nhl_win_predictor_with_odds.pkl / features_with_odds.pkl
+- nhl_win_predictor_no_odds.pkl / features_no_odds.pkl
 - spread_regressor.pkl (optional)
 - total_regressor.pkl (optional)
 
@@ -145,7 +145,7 @@ If you prefer manual setup:
 
 - **Free Tier**: Available on Render's free plan (sleeps after 15min inactivity)
 - **Starter Plan**: $7/month for always-on service with 512MB RAM
-- **Response Time**: ~200-500ms per prediction (including NFL data fetching)
+- **Response Time**: ~200-500ms per prediction (including NHL data fetching)
 - **Throughput**: ~50-100 requests/minute on starter plan
 
 ## API Response Format
@@ -184,7 +184,7 @@ The system implements **Split Conformal Classification** with:
 - **Monotonicity**: Higher scores always mean higher win probability
 
 ### Feature Engineering
-- **EPA (Expected Points Added)**: Gold standard NFL efficiency metric
+- **Goals For/Against Differential**: Core NHL efficiency metric
 - **Recency Weighting**: Exponential decay via rolling windows
 - **Vegas Integration**: Market efficiency + vig removal via normalization
 - **Home Field Advantage**: Differential calculations favor home team
@@ -237,4 +237,4 @@ START_SEASON=2023 END_SEASON=2023 python scripts/train_model.py
 
 **Built for accuracy. Designed for production. Optimized for insights.**
 
-*When you need the best NFL predictions, you need state-of-the-art algorithms.*
+*When you need the best NHL predictions, you need state-of-the-art algorithms.*
