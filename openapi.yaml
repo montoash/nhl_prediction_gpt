@@ -61,6 +61,33 @@ paths:
         '500':
           description: Internal error
 
+  /odds:
+    get:
+      summary: Get current live odds for NHL games
+      operationId: getLiveOdds
+      parameters:
+        - in: query
+          name: home
+          required: false
+          description: Home team NHL abbreviation (optional - if provided with away, gets odds for specific game)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+        - in: query
+          name: away
+          required: false
+          description: Away team NHL abbreviation (optional - if provided with home, gets odds for specific game)
+          schema:
+            $ref: '#/components/schemas/TeamAbbr'
+      responses:
+        '200':
+          description: Live odds data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OddsResponse'
+        '500':
+          description: Internal error
+
 components:
   schemas:
     TeamAbbr:
@@ -149,3 +176,37 @@ components:
         model_type:
           type: string
           description: Model used for prediction (with_odds or without_odds)
+
+    OddsResponse:
+      type: object
+      properties:
+        total_games:
+          type: integer
+          description: Number of games with odds available
+        games:
+          type: array
+          items:
+            type: object
+            properties:
+              game:
+                type: string
+                description: Game matchup (e.g., "BOS @ TOR")
+              odds:
+                type: object
+                properties:
+                  spread_line:
+                    type: number
+                    format: float
+                  total_line:
+                    type: number
+                    format: float
+                  home_moneyline:
+                    type: number
+                  away_moneyline:
+                    type: number
+                  source:
+                    type: string
+        last_updated:
+          type: string
+          format: date-time
+          description: When the odds were last updated

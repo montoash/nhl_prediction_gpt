@@ -317,6 +317,84 @@ def predict():
         logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
 
+@app.route('/odds', methods=['GET', 'OPTIONS'])
+def get_odds():
+    """Get current live odds for NHL games"""
+    try:
+        from datetime import datetime
+        
+        home_team = request.args.get('home')
+        away_team = request.args.get('away')
+        
+        if home_team and away_team:
+            # Get odds for specific game
+            try:
+                odds = get_game_odds(home_team, away_team)
+                if odds:
+                    return jsonify({
+                        'total_games': 1,
+                        'games': [{
+                            'game': f"{away_team} @ {home_team}",
+                            'odds': odds
+                        }],
+                        'last_updated': datetime.now().isoformat()
+                    })
+                else:
+                    return jsonify({
+                        'total_games': 0,
+                        'games': [],
+                        'last_updated': datetime.now().isoformat(),
+                        'message': f'No odds found for {away_team} @ {home_team}'
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to fetch odds for {home_team} vs {away_team}: {e}")
+                return jsonify({
+                    'total_games': 0,
+                    'games': [],
+                    'last_updated': datetime.now().isoformat(),
+                    'error': f'Failed to fetch odds: {str(e)}'
+                })
+        else:
+            # Get all current odds
+            try:
+                all_odds = get_live_odds()
+                games_with_odds = []
+                for game_odds in all_odds:
+                    games_with_odds.append({
+                        'game': game_odds.get('matchup', 'Unknown'),
+                        'odds': {
+                            'spread_line': game_odds.get('spread_line'),
+                            'total_line': game_odds.get('total_line'),
+                            'home_moneyline': game_odds.get('home_moneyline'),
+                            'away_moneyline': game_odds.get('away_moneyline'),
+                            'source': game_odds.get('source', 'api')
+                        }
+                    })
+                
+                return jsonify({
+                    'total_games': len(games_with_odds),
+                    'games': games_with_odds,
+                    'last_updated': datetime.now().isoformat()
+                })
+            except Exception as e:
+                logger.warning(f"Failed to fetch live odds: {e}")
+                # Return empty response instead of error to avoid breaking GPT
+                return jsonify({
+                    'total_games': 0,
+                    'games': [],
+                    'last_updated': datetime.now().isoformat(),
+                    'message': 'Live odds temporarily unavailable'
+                })
+                
+    except Exception as e:
+        logger.error(f"Odds endpoint error: {e}")
+        return jsonify({
+            'total_games': 0,
+            'games': [],
+            'last_updated': datetime.now().isoformat(),
+            'error': 'Odds service unavailable'
+        }), 500
+
 @app.route('/openapi.yaml')
 def openapi_spec():
     """Serve OpenAPI specification"""
@@ -359,6 +437,20 @@ def openapi_json():
                             "description": "NHL teams by division",
                             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/TeamsResponse"}}}
                         }
+                    }
+                }
+            },
+            "/odds": {
+                "get": {
+                    "summary": "Get current live odds for NHL games",
+                    "operationId": "getLiveOdds",
+                    "parameters": [
+                        {"in": "query", "name": "home", "required": False, "description": "Home team NHL abbreviation (optional)", "schema": {"$ref": "#/components/schemas/TeamAbbr"}},
+                        {"in": "query", "name": "away", "required": False, "description": "Away team NHL abbreviation (optional)", "schema": {"$ref": "#/components/schemas/TeamAbbr"}}
+                    ],
+                    "responses": {
+                        "200": {"description": "Live odds data", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OddsResponse"}}}},
+                        "500": {"description": "Internal error"}
                     }
                 }
             },
@@ -420,6 +512,32 @@ def openapi_json():
                         },
                         "features_used": {"type": "array", "items": {"type": "string"}},
                         "model_type": {"type": "string", "description": "Model used for prediction (with_odds or without_odds)"}
+                    }
+                },
+                "OddsResponse": {
+                    "type": "object",
+                    "properties": {
+                        "total_games": {"type": "integer", "description": "Number of games with odds available"},
+                        "games": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "game": {"type": "string", "description": "Game matchup"},
+                                    "odds": {
+                                        "type": "object",
+                                        "properties": {
+                                            "spread_line": {"type": "number", "format": "float"},
+                                            "total_line": {"type": "number", "format": "float"},
+                                            "home_moneyline": {"type": "number"},
+                                            "away_moneyline": {"type": "number"},
+                                            "source": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "last_updated": {"type": "string", "format": "date-time", "description": "When the odds were last updated"}
                     }
                 }
             }
