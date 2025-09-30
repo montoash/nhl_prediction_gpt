@@ -336,7 +336,7 @@ def openapi_json():
             "version": "1.0.0",
             "description": "Predict NHL game outcomes with model probabilities and simple analysis. This spec is tailored for use as a Custom GPT Action."
         },
-        "servers": [{"url": f"{request.scheme}://{request.host}"}],
+        "servers": [{"url": "https://nhl-prediction-gpt-455856529947.us-central1.run.app"}],
         "paths": {
             "/health": {
                 "get": {
