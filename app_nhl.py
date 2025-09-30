@@ -185,6 +185,17 @@ def root():
         }
     })
 
+@app.route('/build', methods=['GET'])
+def build_info():
+    """Return deployment metadata for debugging (git SHA, service env)."""
+    return jsonify({
+        'git_sha': os.environ.get('GIT_SHA', 'unknown'),
+        'app_variant': os.environ.get('APP_VARIANT', 'NHL'),
+        'service': os.environ.get('K_SERVICE', 'unknown'),
+        'revision': os.environ.get('K_REVISION', 'unknown'),
+        'project': os.environ.get('GOOGLE_CLOUD_PROJECT', os.environ.get('GCP_PROJECT', 'unknown'))
+    })
+
 @app.route('/health', methods=['GET', 'OPTIONS'])
 def health():
     health_info = {
